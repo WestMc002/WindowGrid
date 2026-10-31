@@ -1,0 +1,75 @@
+# WindowGrid - automatische Bereitstellung der WindowGrid.exe
+# Baut das Programm, sobald ein Tag v<Version> gepusht wird (setzt Claude beim
+# Hochladen) oder per Hand ueber "Run workflow", und legt ein Release mit der EXE an.
+# Existiert das Release zur Version schon, passiert nichts.
+
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version (z. B. 1.25.2026.1031)'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Version lesen
+        id: ver
+        shell: pwsh
+        run: |
+          $ver = '${{ github.event.inputs.version }}'
+          if(-not $ver) { $ver = '${{ github.ref_name }}'.TrimStart('v') }
+          if($ver -notmatch '^\d+\.\d+\.\d+\.\d+$') { throw "ungueltige Version: $ver" }
+          "ver=$ver" >> $env:GITHUB_OUTPUT
+          gh release view "v$ver" *> $null
+          if($LASTEXITCODE -eq 0) { "exists=1" >> $env:GITHUB_OUTPUT; Write-Host "Release v$ver existiert bereits" }
+          else { "exists=0" >> $env:GITHUB_OUTPUT }
+          exit 0
+
+      - name: Kompilieren
+        if: steps.ver.outputs.exists == '0'
+        shell: pwsh
+        run: |
+          $ver = '${{ steps.ver.outputs.ver }}'
+          @(
+            "[assembly: System.Reflection.AssemblyVersion(`"$ver`")]"
+            "[assembly: System.Reflection.AssemblyFileVersion(`"$ver`")]"
+            "[assembly: System.Reflection.AssemblyInformationalVersion(`"$ver`")]"
+            "namespace WindowGrid { public static partial class AppInfo { public const string Version = `"$ver`"; } }"
+          ) | Set-Content Quellcode\VersionInfo.cs -Encoding utf8
+          New-Item -ItemType Directory -Force Bin | Out-Null
+          $csc = "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
+          & $csc /nologo /target:winexe /optimize+ /codepage:65001 /out:Bin\WindowGrid.exe `
+            "/win32icon:Resources\WindowGrid.ico" `
+            "/resource:Resources\WindowGrid.ico,WindowGrid.ico" `
+            "/resource:Resources\GS-Logo.png,GS-Logo.png" `
+            /r:System.dll /r:System.Core.dll /r:System.Drawing.dll /r:System.Windows.Forms.dll `
+            "/win32manifest:Quellcode\app.manifest" Quellcode\*.cs
+          if($LASTEXITCODE -ne 0) { throw 'Kompilieren fehlgeschlagen' }
+          (Get-Item Bin\WindowGrid.exe).VersionInfo.FileVersion
+
+      - name: Release anlegen
+        if: steps.ver.outputs.exists == '0'
+        shell: pwsh
+        run: |
+          $ver = '${{ steps.ver.outputs.ver }}'
+          $notes = @"
+          **Installation:** ``WindowGrid.exe`` in einen beliebigen Ordner legen und starten – keine Installation nötig. Die Einstellungen landen in ``WindowGrid.ini`` neben der EXE.
+
+          Bei einem Update WindowGrid über das Tray-Menü beenden und die vorhandene ``WindowGrid.exe`` ersetzen.
+
+          **Installation (English):** put ``WindowGrid.exe`` in any folder and start it – no installation required. To update, quit WindowGrid from the tray menu and replace the existing ``WindowGrid.exe``.
+          "@
+          gh release create "v$ver" Bin\WindowGrid.exe --title "WindowGrid $ver" --notes $notes --target $env:GITHUB_SHA

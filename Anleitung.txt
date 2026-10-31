@@ -1,0 +1,147 @@
+﻿WindowGrid 1  –  Fenster beim Ziehen per Raster anordnen
+===========================================================
+
+So funktioniert's
+-----------------
+1. Ein Fenster wie gewohnt an der Titelleiste mit der LINKEN Maustaste ziehen.
+2. Während des Ziehens die LEERTASTE drücken (Taste frei einstellbar).
+   -> Das Raster erscheint auf dem Monitor, auf dem sich die Maus befindet.
+   Solange die Leertaste gehalten wird, wandert das Startfeld mit der Maus –
+   so lässt sich in Ruhe die linke obere (bzw. eine beliebige) Ecke anfahren.
+   Beim Loslassen der Leertaste wird das Startfeld festgelegt.
+   Kurz antippen funktioniert weiterhin: Startfeld = Feld unter der Maus.
+3. Die Maus bewegen: Vom Startfeld bis zum Feld unter der Maus wird die neue
+   Fenstergröße in der Akzentfarbe markiert.
+   Mitten in der Markierung stehen Größe in Pixeln und Anzahl der Felder.
+4. Linke Maustaste loslassen -> das Fenster füllt genau die markierten Felder.
+
+Verschieben im Raster
+---------------------
+Während des Ziehens STRG drücken (Taste frei einstellbar): Das Fenster behält
+seine Größe und rastet beim Loslassen an den Rasterlinien ein.
+
+Freie Felder zum Rand
+---------------------
+Gestrichelte Maßlinien zeigen, wie viele Felder links, oben, rechts und unten
+bis zum Bildschirmrand frei sind. Sind links und rechts (bzw. oben und unten)
+gleich viele Felder frei, werden beide Zahlen in der Akzentfarbe hervorgehoben –
+das Fenster sitzt dann genau mittig. Abschaltbar unter Darstellung.
+
+Zentrieren
+----------
+Bei sichtbarem Raster "C" drücken (Taste frei einstellbar): Die Auswahl bzw. das
+Fenster springt genau in die Mitte des Bildschirms – links/rechts und oben/unten
+sind gleich viele Felder frei. Die Größe lässt sich mit der Maus weiter ändern,
+das Fenster bleibt dabei mittig. Nochmal "C" schaltet das Zentrieren wieder aus.
+
+Raster feiner/gröber mit dem Mausrad
+------------------------------------
+Bei sichtbarem Raster das Mausrad drehen:
+  nach oben  -> feineres Raster (doppelt so viele Felder, bis 4-fach)
+  nach unten -> gröberes Raster (halb so viele Felder, bis 1/16)
+Beispiel bei 12 x 8: 3 x 2, 6 x 4, 12 x 8, 24 x 16 ... Beim nächsten Ziehen
+startet das Raster wieder mit der eingestellten Feinheit.
+
+Schnellzonen 1–9
+----------------
+Bei sichtbarem Raster eine Ziffer 1–9 drücken (oben oder Ziffernblock): Das Fenster
+springt sofort auf die gespeicherte Zone, z. B. 1 = linke Hälfte, 2 = rechte Hälfte,
+3 = mittleres Drittel. Gleiche Ziffer nochmal = Zone wieder aus.
+Umschalt+Ziffer speichert die aktuelle Auswahl als diese Zone.
+Bearbeiten: Einstellungen -> Bedienung -> Schnellzonen "Bearbeiten …" (Name und
+Bereich in Prozent des Bildschirms, mit kleiner Vorschau). Die Zonen gelten auf
+jedem Monitor und unabhängig von der Rasterfeinheit.
+
+Feinjustieren mit den Pfeiltasten
+---------------------------------
+Bei sichtbarem Raster:
+  Pfeiltasten            -> Auswahl um ein Feld verschieben
+  Umschalt+Pfeiltasten   -> Auswahl um ein Feld größer/kleiner (rechts/unten)
+Im Verschieben-Modus bewegen die Pfeiltasten das Fenster um ein Feld.
+Sobald die Maus in ein anderes Feld bewegt wird, bestimmt wieder die Maus.
+
+Letzte Auswahl wiederholen
+--------------------------
+Die Größe-Taste (Standard: Leertaste) zweimal schnell drücken: Das Fenster kommt
+genau auf den Bereich, auf den zuletzt ein Fenster gelegt wurde. So lassen sich
+mehrere Fenster schnell gleich anordnen. Die letzte Auswahl bleibt auch nach
+einem Neustart erhalten.
+
+Windows-Andocklayouts
+---------------------
+Windows 11 zeigt beim Ziehen an den oberen Bildschirmrand eigene Andocklayouts.
+Damit sie sich nicht mit dem Raster überlagern, in den WindowGrid-Einstellungen bei
+"Windows-Andocklayouts" auf "Öffnen …" klicken. Es öffnet sich
+Einstellungen -> System -> Multitasking. Dort den Haken bei "Andocklayouts anzeigen,
+wenn ich ein Fenster an den oberen Bildschirmrand ziehe" entfernen. Das wirkt sofort.
+Das Andocken an den Bildschirmrändern schaltet WindowGrid nur ab, solange das Raster
+sichtbar ist.
+
+Weitere Tasten während das Raster sichtbar ist
+----------------------------------------------
+- Gleiche Taste nochmal drücken   -> Raster aus, normal weiterziehen
+- Andere Taste drücken            -> zwischen Größe/Verschieben wechseln
+- Esc                             -> Raster aus (zweites Esc bricht das Ziehen ab)
+- Maus auf anderen Monitor        -> Raster wechselt mit
+
+Tray-Symbol (unten rechts neben der Uhr)
+----------------------------------------
+- Linksklick        -> Einstellungen
+- Rechtsklick       -> Menü im Windows-11-Stil: oben Status (Aktiv/Pausiert,
+                       ADMIN-Kennzeichen), darunter Einstellungen, Pausieren und
+                       Mit Windows starten (als Schalter), Info über WindowGrid, Beenden
+- Klick auf die Versionsnummer im Einstellungsfenster öffnet ebenfalls "Info über WindowGrid"
+  (Logo, Version, Anleitung, Ordner mit den Sicherungen).
+- Programm nochmal starten öffnet ebenfalls die Einstellungen.
+
+Einstellungen
+-------------
+- Spalten / Zeilen  : Feinheit des Rasters (1 bis 100)
+- Abstand           : Lücke zwischen den Fenstern und zum Bildschirmrand (px)
+- Bedienung         : Tasten für "Größe anpassen", "Verschieben" und "Zentrieren" frei zuweisen,
+                      Schnellzonen 1–9 bearbeiten
+                      (Tastenfeld anklicken, gewünschte Taste drücken) und ein-/ausschalten
+- Abdunkelung       : wie stark der Bildschirm hinter dem Raster abgedunkelt wird
+- Farbe             : Windows-Akzentfarbe oder eigene Farbe
+- Freie Felder      : Maßlinien zum Bildschirmrand ein-/ausblenden
+- Mit Windows starten (Eintrag unter HKCU\...\Run)
+- Windows-Andocklayouts: öffnet die Windows-Einstellung, um die Andocklayouts auszuschalten
+- Mit Administratorrechten: Autostart läuft dann über die Aufgabenplanung
+  (Aufgabe "WindowGrid", "Mit höchsten Privilegien"). Windows fragt nur beim
+  Einrichten einmal nach. Nach dem Speichern kann WindowGrid sofort mit
+  Adminrechten neu gestartet werden. Im Info-Fenster steht unter "Rechte",
+  ob WindowGrid gerade als Administrator läuft.
+
+Die Einstellungen liegen portabel in "WindowGrid.ini" neben der EXE
+(falls der Ordner schreibgeschützt ist: %APPDATA%\WindowGrid\WindowGrid.ini).
+
+Erstellen
+---------
+WindowGrid über das Tray-Menü beenden, dann Erstellen.bat doppelklicken. Sie
+  1. wartet, bis WindowGrid beendet ist,
+  2. zählt die Version automatisch hoch (1.<Nebenversion>.<Jahr>.<MonatTag>;
+     Nebenversion = höchste vorhandene + 1) und erzeugt Quellcode\VersionInfo.cs,
+  3. kompiliert mit dem in Windows enthaltenen C#-Compiler (.NET Framework 4.x),
+     zuerst als WindowGrid.neu.exe – bei Fehlern bleibt die alte EXE erhalten,
+  4. verschiebt die bisherige EXE nach Backup\WindowGrid v<alte Version>,
+  5. startet das neue WindowGrid,
+  6. sichert das komplette Projekt nach Backup\WindowGrid v<Version>.
+Die Compiler-Meldungen stehen in Erstellen.log. Mit dem Parameter /nopause
+schließt sich das Fenster am Ende ohne Tastendruck.
+
+Ordner
+------
+Quellcode                C# Quellcode (wird kompiliert)
+Resources                Programm-Icon und GS-Logo (werden in die EXE eingebettet)
+Design\Icon-Vorschläge   alternative Logos (ICO + PNG) mit Übersicht
+Backup                   Sicherungen je Version
+WindowGrid.ini           Einstellungen (portabel neben der EXE)
+Erstellen.log            Compiler-Meldungen des letzten Builds
+
+Hinweise
+--------
+- Fenster von Programmen, die als Administrator laufen, kann WindowGrid nur
+  anordnen, wenn WindowGrid selbst als Administrator läuft
+  (Einstellungen -> "Mit Administratorrechten").
+- Die alte Version bitte beenden und deren Autostart (Aufgabenplanung,
+  Aufgabe "WindowGrid") entfernen, sonst reagieren beide Programme.
