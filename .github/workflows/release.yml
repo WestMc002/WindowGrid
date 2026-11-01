@@ -1,18 +1,20 @@
-# WindowGrid - automatische Bereitstellung der WindowGrid.exe
-# Baut das Programm, sobald ein Tag v<Version> gepusht wird (setzt Claude beim
-# Hochladen) oder per Hand ueber "Run workflow", und legt ein Release mit der EXE an.
-# Existiert das Release zur Version schon, passiert nichts.
+# WindowGrid - automatische Bereitstellung als ZIP (WindowGrid.exe + Anleitung.txt)
+# Ausloeser: Aenderung dieser Datei auf main oder per Hand ueber "Run workflow"
+# (Eingabe der Versionsnummer). Ohne Eingabe gilt die Version aus dem neuesten
+# Commit "WindowGrid <Version> - Aenderungen".
+# Gibt es das Release zur Version schon, wird nichts neu gebaut, nur der Text aufgefrischt.
 
 name: Release
 
 on:
   push:
-    tags: ['v*']
+    branches: [main]
+    paths: [.github/workflows/release.yml]
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version (z. B. 1.25.2026.1031)'
-        required: true
+        description: 'Version (z. B. 1.28.2026.1101)'
+        required: false
 
 permissions:
   contents: write
@@ -24,19 +26,53 @@ jobs:
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Version lesen
         id: ver
         shell: pwsh
         run: |
+          [Console]::OutputEncoding = [Text.Encoding]::UTF8
           $ver = '${{ github.event.inputs.version }}'
-          if(-not $ver) { $ver = '${{ github.ref_name }}'.TrimStart('v') }
-          if($ver -notmatch '^\d+\.\d+\.\d+\.\d+$') { throw "ungueltige Version: $ver" }
+          if(-not $ver) {
+            $subj = git log --format=%s | Where-Object { $_ -match '^WindowGrid (\d+\.\d+\.\d+\.\d+)' } | Select-Object -First 1
+            if($subj -match '^WindowGrid (\d+\.\d+\.\d+\.\d+)') { $ver = $Matches[1] }
+          }
+          if($ver -notmatch '^\d+\.\d+\.\d+\.\d+$') { throw "keine gueltige Version gefunden: $ver" }
           "ver=$ver" >> $env:GITHUB_OUTPUT
           gh release view "v$ver" *> $null
-          if($LASTEXITCODE -eq 0) { "exists=1" >> $env:GITHUB_OUTPUT; Write-Host "Release v$ver existiert bereits" }
+          if($LASTEXITCODE -eq 0) { "exists=1" >> $env:GITHUB_OUTPUT; Write-Host "Release v$ver existiert bereits - nur Text auffrischen" }
           else { "exists=0" >> $env:GITHUB_OUTPUT }
           exit 0
+
+      - name: Release-Text erstellen
+        shell: pwsh
+        run: |
+          [Console]::OutputEncoding = [Text.Encoding]::UTF8
+          $ver = '${{ steps.ver.outputs.ver }}'
+          # neuester Commit, dessen Text die Versionsnummer nennt
+          $sha = git log --format=%H -F --grep="$ver" -n 1
+          $punkte = @()
+          if($sha) {
+            $punkte = @(git log -1 --format=%B $sha | Where-Object { $_ -match '^\s*- ' } | ForEach-Object { $_.Trim() })
+          }
+          $zeilen = New-Object System.Collections.Generic.List[string]
+          if($punkte.Count -gt 0) {
+            $zeilen.Add('## Änderungen'); $zeilen.Add('')
+            foreach($p in $punkte) { $zeilen.Add($p) }
+            $zeilen.Add('')
+          }
+          $zeilen.Add('## Installation')
+          $zeilen.Add('')
+          $zeilen.Add("- ZIP ``WindowGrid-$ver.zip`` herunterladen und in einen eigenen Ordner mit Schreibrechten entpacken, z. B. ``C:\Tools\WindowGrid`` – WindowGrid speichert seine Einstellungen in ``WindowGrid.ini`` neben der EXE.")
+          $zeilen.Add('- `WindowGrid.exe` starten. Das Symbol erscheint im Infobereich neben der Uhr; Linksklick öffnet die Einstellungen.')
+          $zeilen.Add('- Erste Schritte: ein Fenster an der Titelleiste ziehen und dabei die Leertaste drücken – das Raster erscheint.')
+          $zeilen.Add('- Update: WindowGrid über das Tray-Menü beenden und die vorhandene `WindowGrid.exe` ersetzen.')
+          $zeilen.Add('- Voraussetzungen: Windows 10 oder 11 mit .NET Framework 4.x (in Windows enthalten).')
+          $zeilen.Add('- Ausführliche Beschreibung in `Anleitung.txt` im ZIP.')
+          [IO.File]::WriteAllText("$PWD\notes.md", ($zeilen -join "`n"), (New-Object System.Text.UTF8Encoding($false)))
+          Get-Content notes.md -Encoding utf8
 
       - name: Kompilieren
         if: steps.ver.outputs.exists == '0'
@@ -65,18 +101,13 @@ jobs:
         shell: pwsh
         run: |
           $ver = '${{ steps.ver.outputs.ver }}'
-          # Aenderungen = Aufzaehlungspunkte ("- ...") aus dem Commit-Text
-          $msg = git log -1 --format=%B $env:GITHUB_SHA
-          $punkte = @($msg | Where-Object { $_ -match '^\s*[-*] ' } | ForEach-Object { '- ' + ($_ -replace '^\s*[-*] ', '').Trim() })
-          $teile = @()
-          if($punkte.Count -gt 0) { $teile += '## Änderungen'; $teile += ''; $teile += $punkte; $teile += '' }
-          $teile += '## Installation'
-          $teile += ''
-          $teile += '`WindowGrid.exe` in einen beliebigen Ordner legen und starten – keine Installation nötig. Die Einstellungen landen in `WindowGrid.ini` neben der EXE.'
-          $teile += ''
-          $teile += 'Bei einem Update WindowGrid über das Tray-Menü beenden und die vorhandene `WindowGrid.exe` ersetzen.'
-          $teile += ''
-          $teile += '**English:** put `WindowGrid.exe` in any folder and start it – no installation required. To update, quit WindowGrid from the tray menu and replace the existing `WindowGrid.exe`.'
-          $notes = $teile -join "`n"
-          Set-Content -Path notes.md -Value $notes -Encoding utf8
-          gh release create "v$ver" Bin\WindowGrid.exe --title "WindowGrid $ver" --notes-file notes.md --target $env:GITHUB_SHA
+          $zip = "WindowGrid-$ver.zip"
+          Compress-Archive -Path Bin\WindowGrid.exe, Anleitung.txt -DestinationPath $zip -Force
+          gh release create "v$ver" $zip --title "WindowGrid $ver" --notes-file notes.md --target $env:GITHUB_SHA
+
+      - name: Release-Text auffrischen
+        if: steps.ver.outputs.exists == '1'
+        shell: pwsh
+        run: |
+          $ver = '${{ steps.ver.outputs.ver }}'
+          gh release edit "v$ver" --notes-file notes.md
