@@ -353,7 +353,7 @@ namespace WindowGrid
             _showSize.Checked = _edit.ShowSize;
             _showMargins.Checked = _edit.ShowMargins;
             _animate.Checked = _edit.Animate;
-            if (includeAutostart) _autostart.Checked = Autostart.IsEnabled;
+            if (includeAutostart) _autostart.Checked = Demo.Active || Autostart.IsEnabled;
             UpdatePreview();
         }
 

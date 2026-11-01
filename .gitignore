@@ -5,6 +5,7 @@ Bin/
 *.neu.exe
 Erstellen.log
 Quellcode/VersionInfo.cs
+Screenshots/Fehler.txt
 
 # Eigene Entwürfe
 Design/

@@ -12,8 +12,18 @@ namespace WindowGrid
     internal static class Program
     {
         [STAThread]
-        private static void Main(string[] args)
+        private static int Main(string[] args)
         {
+            // Screenshots für GitHub mit Beispieldaten: WindowGrid.exe --screenshots [Zielordner]
+            int shot = Array.FindIndex(args, a => string.Equals(a, "--screenshots", StringComparison.OrdinalIgnoreCase));
+            if (shot >= 0)
+            {
+                Application.EnableVisualStyles();
+                Application.SetCompatibleTextRenderingDefault(false);
+                string dir = shot + 1 < args.Length ? args[shot + 1] : System.IO.Path.Combine(AppInfo.ExeDirectory, "Screenshots");
+                return Demo.RunScreenshots(dir) ? 0 : 1;
+            }
+
             bool created;
             using (Mutex mutex = new Mutex(true, "WindowGrid_Modern_SingleInstance", out created))
             {
@@ -34,7 +44,7 @@ namespace WindowGrid
                         ev.Dispose();
                     }
                     catch { }
-                    return;
+                    return 0;
                 }
 
                 Application.EnableVisualStyles();
@@ -51,6 +61,7 @@ namespace WindowGrid
                 Application.Run(new TrayContext());
                 GC.KeepAlive(mutex);
             }
+            return 0;
         }
     }
 }

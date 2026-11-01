@@ -41,8 +41,8 @@ The program interface is in German.
 
 ### Installation
 
-1. Download `WindowGrid.exe` from the [Releases](https://github.com/WestMc002/WindowGrid/releases).
-2. Put it in a folder of your choice and start it – no installation required.
+1. Download the ZIP `WindowGrid-<version>.zip` from the [Releases](https://github.com/WestMc002/WindowGrid/releases).
+2. Extract it into a folder of its own with write access (e.g. `C:\Tools\WindowGrid`) and start `WindowGrid.exe` – no installation required. Settings are stored in `WindowGrid.ini` next to the EXE.
 3. Optional: enable “Mit Windows starten” (start with Windows) in the settings.
 
 Requirements: Windows 10 or 11 with .NET Framework 4.x (included in Windows).
@@ -84,8 +84,8 @@ Die ausführliche Anleitung steht in [Anleitung.txt](Anleitung.txt).
 
 ### Installation
 
-1. `WindowGrid.exe` aus den [Releases](https://github.com/WestMc002/WindowGrid/releases) herunterladen.
-2. In einen beliebigen Ordner legen und starten – keine Installation nötig.
+1. Das ZIP `WindowGrid-<Version>.zip` aus den [Releases](https://github.com/WestMc002/WindowGrid/releases) herunterladen.
+2. In einen eigenen Ordner mit Schreibrechten entpacken (z. B. `C:\Tools\WindowGrid`) und `WindowGrid.exe` starten – keine Installation nötig. Die Einstellungen landen in `WindowGrid.ini` neben der EXE.
 3. Optional: in den Einstellungen „Mit Windows starten“ einschalten.
 
 Voraussetzungen: Windows 10 oder 11 mit .NET Framework 4.x (in Windows enthalten).

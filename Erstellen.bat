@@ -6,7 +6,7 @@ ECHO #                                     #
 ECHO #  Autor: Guenther Schoder            #
 ECHO #         www.westmc002.de            #
 ECHO #                                     #
-ECHO #  Datum: 30.10.2026 / 30.10.2026     #
+ECHO #  Datum: 30.10.2026 / 01.11.2026     #
 ECHO #######################################
 ECHO.
 
@@ -89,6 +89,17 @@ COLOR A0
 ECHO Erfolgreich erstellt: %EXE% (Version %VER%)
 
 REM Optionale projektspezifische Zusatzschritte hier einfuegen
+REM Screenshots fuer GitHub aus Beispieldaten (hell und dunkel) nach Screenshots,
+REM nur auf Nachfrage: ohne Antwort nach 10 Sekunden Nein, bei /nopause nie
+IF /I "%~1"=="/nopause" GOTO :NOSHOTS
+ECHO.
+CHOICE /C JN /T 10 /D N /M "Screenshots fuer GitHub erstellen (nach 10 s automatisch Nein)"
+IF ERRORLEVEL 2 GOTO :NOSHOTS
+ECHO Erstelle Screenshots (bitte Maus und Tastatur kurz nicht benutzen) ...
+START "" /WAIT "%EXE%" --screenshots "%CD%\Screenshots"
+IF ERRORLEVEL 1 (ECHO Hinweis: Screenshots fehlgeschlagen - siehe Screenshots\Fehler.txt) ELSE (ECHO Screenshots erstellt.)
+:NOSHOTS
+
 REM WindowGrid: neue Version gleich wieder starten (laeuft im Tray)
 START "" "%EXE%"
 

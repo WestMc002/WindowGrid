@@ -23,7 +23,8 @@ namespace WindowGrid
         public static MenuTheme Current()
         {
             bool dark = false;
-            try
+            if (Theme.Override.HasValue) dark = Theme.Override.Value;
+            else try
             {
                 using (var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"))
                 {

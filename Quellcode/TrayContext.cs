@@ -33,6 +33,21 @@ namespace WindowGrid
         private readonly Control _invoker;
         private SettingsForm _form;
 
+        /// <summary>Nur für die Screenshots: Menü mit Beispieldaten, ohne Tray-Symbol und ohne Hooks.</summary>
+        private TrayContext(Settings settings, Icon appIcon)
+        {
+            _settings = settings;
+            _appIcon = appIcon;
+            _menu = new ContextMenuStrip();
+            BuildMenu();
+            _menu.Opened += delegate { MenuHelper.RoundCorners(_menu); };
+        }
+
+        internal static ContextMenuStrip CreateDemoMenu(Settings settings, Icon appIcon)
+        {
+            return new TrayContext(settings, appIcon)._menu;
+        }
+
         public TrayContext()
         {
             _invoker = new Control();
@@ -90,7 +105,7 @@ namespace WindowGrid
             }
         }
 
-        private static Icon LoadIcon(int size)
+        internal static Icon LoadIcon(int size)
         {
             try
             {
@@ -160,7 +175,7 @@ namespace WindowGrid
             try { icon = Theme.IconToBitmap(_appIcon, (int)(64 * _menuScale)); } catch { }
             MenuHeader header = new MenuHeader(_menuTheme, _menuScale, icon);
             header.Title = "WindowGrid";
-            header.Badge = Autostart.IsElevated ? "ADMIN" : null;
+            header.Badge = !Demo.Active && Autostart.IsElevated ? "ADMIN" : null;
             header.Version = "v" + ShortVersion;
             header.Status = _settings.Paused ? "Pausiert" : "Aktiv · Fenster ziehen + " + KeyNames.Get(_settings.ResizeKey);
             header.StatusColor = _settings.Paused ? Color.FromArgb(150, 150, 150) : Color.FromArgb(34, 160, 80);
@@ -177,7 +192,7 @@ namespace WindowGrid
             MakeToggle(pause, _settings.Paused);
             _menu.Items.Add(pause);
 
-            bool autoOn = Autostart.IsEnabled;
+            bool autoOn = Demo.Active || Autostart.IsEnabled;
             GlyphMenuItem auto = Item("Mit Windows starten", MenuHelper.Startup, delegate
             {
                 if (!Autostart.Set(!autoOn, _settings.RunAsAdmin))

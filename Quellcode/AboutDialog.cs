@@ -39,7 +39,7 @@ namespace WindowGrid
             }
         }
 
-        private AboutDialog(Form owner)
+        internal AboutDialog(Form owner)
         {
             bool dark = Theme.IsDark;
             _back = dark ? Color.FromArgb(32, 32, 32) : Color.FromArgb(243, 243, 243);
@@ -111,8 +111,8 @@ namespace WindowGrid
                 { "Entwickler", "Günther Schoder" },
                 { "Erstellt", built },
                 { "Farbschema", (dark ? "dunkel" : "hell") + " (folgt Windows)" },
-                { "Rechte", Autostart.IsElevated ? "Administrator" : "Standard" },
-                { "Programm", AppInfo.ExeDirectory }
+                { "Rechte", !Demo.Active && Autostart.IsElevated ? "Administrator" : "Standard" },
+                { "Programm", Demo.Active ? Demo.ProgramPath : AppInfo.ExeDirectory }
             };
             int rowCount = rows.GetLength(0);
             InfoCard card = new InfoCard(k, _card, _border, _back);

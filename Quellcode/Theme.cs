@@ -31,10 +31,14 @@ namespace WindowGrid
         private static string _fontFamily;
         public static Color Accent = Color.FromArgb(0, 120, 212);
 
+        /// <summary>Fest vorgegebenes Farbschema (Screenshots); null = wie Windows.</summary>
+        public static bool? Override;
+
         public static bool IsDark
         {
             get
             {
+                if (Override.HasValue) return Override.Value;
                 try
                 {
                     using (RegistryKey key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"))

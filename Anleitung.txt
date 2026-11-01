@@ -124,15 +124,28 @@ WindowGrid über das Tray-Menü beenden, dann Erstellen.bat doppelklicken. Sie
   3. kompiliert mit dem in Windows enthaltenen C#-Compiler (.NET Framework 4.x),
      zuerst als WindowGrid.neu.exe – bei Fehlern bleibt die alte EXE erhalten,
   4. verschiebt die bisherige EXE nach Backup\WindowGrid v<alte Version>,
-  5. startet das neue WindowGrid,
-  6. sichert das komplette Projekt nach Backup\WindowGrid v<Version>.
+  5. fragt, ob die Screenshots für GitHub neu erstellt werden sollen
+     (ohne Antwort nach 10 Sekunden Nein, siehe unten),
+  6. startet das neue WindowGrid,
+  7. sichert das komplette Projekt nach Backup\WindowGrid v<Version>.
 Die Compiler-Meldungen stehen in Erstellen.log. Mit dem Parameter /nopause
 schließt sich das Fenster am Ende ohne Tastendruck.
+
+Screenshots für GitHub
+----------------------
+WindowGrid.exe --screenshots [Zielordner] erstellt die Bilder für die README
+(Standard: Ordner Screenshots neben der EXE), je einmal hell und dunkel:
+Einstellungen (hell.png/dunkel.png), Tray-Menü, Schnellzonen, Info-Fenster sowie
+Raster und zentriertes Raster über einem Beispiel-Desktop. Verwendet werden die
+Standardeinstellungen; die eigene WindowGrid.ini, der Autostart und der Bildschirm-
+inhalt bleiben unberührt. Während der Aufnahme Maus und Tastatur kurz nicht benutzen.
+Fehler stehen in Screenshots\Fehler.txt.
 
 Ordner
 ------
 Quellcode                C# Quellcode (wird kompiliert)
 Resources                Programm-Icon und GS-Logo (werden in die EXE eingebettet)
+Screenshots              Bilder für die README auf GitHub (WindowGrid.exe --screenshots)
 Design\Icon-Vorschläge   alternative Logos (ICO + PNG) mit Übersicht
 Backup                   Sicherungen je Version
 WindowGrid.ini           Einstellungen (portabel neben der EXE)

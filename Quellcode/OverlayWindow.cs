@@ -349,6 +349,12 @@ namespace WindowGrid
             SizeF ts = g.MeasureString(text, _fontHint, PointF.Empty, StringFormat.GenericTypographic);
             float pw = Math.Max(ts.Width + 16f * sc, 26f * sc), ph = ts.Height + 8f * sc;
             PointF mid = new PointF((a.X + b.X) / 2f, (a.Y + b.Y) / 2f);
+            if (!horizontal && a.Y < _screen.Top + 20f * sc)
+            {
+                // Obere Maßlinie: Zahl nicht unter die Hinweisleiste oben setzen (endet bei 52 × Skalierung)
+                float free = _screen.Top + 58f * sc;
+                if (mid.Y - ph / 2f < free && b.Y - free >= ph) mid.Y = (free + b.Y) / 2f;
+            }
             RectangleF pill = new RectangleF(mid.X - pw / 2f, mid.Y - ph / 2f, pw, ph);
             Color fill = highlight ? _accent : Color.FromArgb(225, 22, 24, 28);
             using (GraphicsPath p = Theme.RoundRect(pill, ph / 2f))
@@ -450,9 +456,18 @@ namespace WindowGrid
                 g.DrawString(sub, _fontSmall, t, cx, y + (h - s2.Height) / 2f, StringFormat.GenericTypographic);
         }
 
+        /// <summary>Nur zeichnen, nicht anzeigen (Screenshots).</summary>
+        public bool Offscreen;
+
+        /// <summary>Gezeichnetes Overlay (Raster, Auswahl, Hinweise) auf eine andere Fläche übertragen.</summary>
+        public void DrawTo(Graphics g)
+        {
+            if (_surface != null) g.DrawImage(_surface, 0, 0, _w, _h);
+        }
+
         private void Present()
         {
-            if (_memDC == IntPtr.Zero) return;
+            if (_memDC == IntPtr.Zero || Offscreen) return;
             NativeMethods.POINT dst = new NativeMethods.POINT(_screen.X, _screen.Y);
             NativeMethods.SIZE size = new NativeMethods.SIZE(_w, _h);
             NativeMethods.POINT src = new NativeMethods.POINT(0, 0);
