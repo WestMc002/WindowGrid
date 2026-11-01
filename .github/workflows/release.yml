@@ -65,11 +65,18 @@ jobs:
         shell: pwsh
         run: |
           $ver = '${{ steps.ver.outputs.ver }}'
-          $notes = @"
-          **Installation:** ``WindowGrid.exe`` in einen beliebigen Ordner legen und starten – keine Installation nötig. Die Einstellungen landen in ``WindowGrid.ini`` neben der EXE.
-
-          Bei einem Update WindowGrid über das Tray-Menü beenden und die vorhandene ``WindowGrid.exe`` ersetzen.
-
-          **Installation (English):** put ``WindowGrid.exe`` in any folder and start it – no installation required. To update, quit WindowGrid from the tray menu and replace the existing ``WindowGrid.exe``.
-          "@
-          gh release create "v$ver" Bin\WindowGrid.exe --title "WindowGrid $ver" --notes $notes --target $env:GITHUB_SHA
+          # Aenderungen = Aufzaehlungspunkte ("- ...") aus dem Commit-Text
+          $msg = git log -1 --format=%B $env:GITHUB_SHA
+          $punkte = @($msg | Where-Object { $_ -match '^\s*[-*] ' } | ForEach-Object { '- ' + ($_ -replace '^\s*[-*] ', '').Trim() })
+          $teile = @()
+          if($punkte.Count -gt 0) { $teile += '## Änderungen'; $teile += ''; $teile += $punkte; $teile += '' }
+          $teile += '## Installation'
+          $teile += ''
+          $teile += '`WindowGrid.exe` in einen beliebigen Ordner legen und starten – keine Installation nötig. Die Einstellungen landen in `WindowGrid.ini` neben der EXE.'
+          $teile += ''
+          $teile += 'Bei einem Update WindowGrid über das Tray-Menü beenden und die vorhandene `WindowGrid.exe` ersetzen.'
+          $teile += ''
+          $teile += '**English:** put `WindowGrid.exe` in any folder and start it – no installation required. To update, quit WindowGrid from the tray menu and replace the existing `WindowGrid.exe`.'
+          $notes = $teile -join "`n"
+          Set-Content -Path notes.md -Value $notes -Encoding utf8
+          gh release create "v$ver" Bin\WindowGrid.exe --title "WindowGrid $ver" --notes-file notes.md --target $env:GITHUB_SHA
