@@ -18,6 +18,12 @@ namespace WindowGrid
     internal sealed class AboutDialog : Form
     {
         private static AboutDialog _open;
+
+        /// <summary>Einstellungen des laufenden WindowGrid (vom Tray gesetzt) – für die Update-Zeilen.</summary>
+        public static Settings LiveSettings;
+
+        /// <summary>Startet das Selbst-Update (vom Tray gesetzt; läuft erst nach dem Schließen des Info-Fensters).</summary>
+        public static Action StartInstall;
         private readonly float k;
         private readonly DialogButton _close;
 
@@ -64,7 +70,7 @@ namespace WindowGrid
             Font = new Font("Segoe UI", 9.5f);
             KeyPreview = true;
             using (Graphics g = CreateGraphics()) k = g.DpiX / 96f;
-            int W = S(480);
+            int W = S(540); // mit Updates-Zeilen breiter (wie Wake on LAN und Fensterpositionen)
 
             int y = S(24);
             PictureBox logo = new PictureBox();
@@ -115,9 +121,10 @@ namespace WindowGrid
                 { "Programm", Demo.Active ? Demo.ProgramPath : AppInfo.ExeDirectory }
             };
             int rowCount = rows.GetLength(0);
+            Settings settings = Demo.Active || LiveSettings == null ? new Settings() : LiveSettings;
             InfoCard card = new InfoCard(k, _card, _border, _back);
             card.Location = new Point(S(24), y);
-            card.Size = new Size(W - S(48), S(18) * 2 + rowCount * S(26));
+            card.Size = new Size(W - S(48), S(18) * 2 + rowCount * S(26) + S(60) + S(32)); // + Zeilen Updates und Automatisch prüfen
             ToolTip tip = new ToolTip();
             for (int i = 0; i < rowCount; i++)
             {
@@ -141,6 +148,7 @@ namespace WindowGrid
                 tip.SetToolTip(v, rows[i, 1]);
                 card.Controls.Add(v);
             }
+            AddUpdateRows(card, S(18) + rowCount * S(26), settings);
             Controls.Add(card);
             y += card.Height + S(24);
 
@@ -182,10 +190,137 @@ namespace WindowGrid
 
         private int S(float v) { return (int)Math.Round(v * k); }
 
+        /// <summary>
+        /// Updates (Vorlage: Wake on LAN): Symbol und Stand, darunter grau die letzte Prüfung; rechts ein kleiner Knopf
+        /// ("Jetzt prüfen", bei neuer Version "Aktualisieren" bzw. "Release-Seite"), darunter der Schalter
+        /// "Automatisch prüfen". Das Ergebnis einer Prüfung von Hand erscheint nur hier.
+        /// </summary>
+        private void AddUpdateRows(InfoCard card, int uy, Settings settings)
+        {
+            bool dark = Theme.IsDark;
+            Color green = dark ? Color.FromArgb(108, 203, 95) : Color.FromArgb(15, 123, 15);
+            Color red = dark ? Color.FromArgb(255, 153, 164) : Color.FromArgb(196, 43, 28);
+            int x0 = S(24) + S(118);           // Spalte der Werte
+            int right = card.Width - S(24);    // rechter Rand der Werte
+
+            Label name = new Label();
+            name.Text = "Updates";
+            name.ForeColor = _muted;
+            name.BackColor = _card;
+            name.TextAlign = ContentAlignment.MiddleLeft;
+            name.Bounds = new Rectangle(S(24), uy + S(9), S(110), S(22));
+            card.Controls.Add(name);
+
+            StatusGlyph glyph = new StatusGlyph(k);
+            glyph.BackColor = _card;
+            glyph.Bounds = new Rectangle(x0, uy + S(9), S(20), S(22));
+            card.Controls.Add(glyph);
+
+            Label title = new Label();
+            title.ForeColor = _text;
+            title.BackColor = _card;
+            title.AutoEllipsis = true;
+            title.UseMnemonic = false;
+            title.TextAlign = ContentAlignment.MiddleLeft;
+            card.Controls.Add(title);
+
+            Label detail = new Label();
+            detail.ForeColor = _muted;
+            detail.BackColor = _card;
+            detail.AutoEllipsis = true;
+            detail.UseMnemonic = false;
+            detail.TextAlign = ContentAlignment.TopLeft;
+            detail.Font = new Font("Segoe UI", 8.75f);
+            card.Controls.Add(detail);
+
+            DialogButton check = new DialogButton("Jetzt prüfen", MenuHelper.Refresh, false, k, this, 30);
+            DialogButton install = new DialogButton("Aktualisieren", MenuHelper.Download, true, k, this, 30);
+            DialogButton page = new DialogButton("Release-Seite", MenuHelper.Link, false, k, this, 30);
+            ToolTip tip = new ToolTip();
+            tip.SetToolTip(install, "WindowGrid beenden, auf die neue Version aktualisieren und neu starten");
+            foreach (DialogButton b in new DialogButton[] { check, install, page })
+            {
+                // rechtsbündig mit dem Schalter darunter und auf Höhe der ersten Zeile,
+                // damit die zweite Zeile (letzte Prüfung) die volle Breite hat
+                b.Location = new Point(right - S(2) - b.Width, uy + S(20) - b.Height / 2);
+                card.Controls.Add(b);
+                b.BringToFront(); // vor der zweiten Zeile, die bis zum rechten Rand reicht – sonst ist der Knopf unten abgeschnitten
+            }
+
+            Action<UpdateStatus> show = delegate (UpdateStatus st)
+            {
+                switch (st.Kind)
+                {
+                    case UpdateKind.Current: glyph.Set(MenuHelper.Completed, green); break;
+                    case UpdateKind.Available: glyph.Set(MenuHelper.Download, _versionText); break;
+                    case UpdateKind.Failed: glyph.Set(MenuHelper.Warning, red); break;
+                    case UpdateKind.Checking: glyph.Set(MenuHelper.Sync, _muted); break;
+                    default: glyph.Set(MenuHelper.Info, _muted); break;
+                }
+                title.Text = st.Title;
+                title.ForeColor = st.Kind == UpdateKind.Available ? _versionText : st.Kind == UpdateKind.Checking ? _muted : _text;
+                detail.Text = st.Detail;
+                tip.SetToolTip(detail, st.Detail);
+                bool available = st.Kind == UpdateKind.Available;
+                bool canInstall = available && !Demo.Active && Updater.CanInstall();
+                install.Visible = canInstall;
+                page.Visible = available && !canInstall;
+                check.Visible = !available;
+                check.Enabled = st.Kind != UpdateKind.Checking;
+                DialogButton shown = install.Visible ? install : page.Visible ? page : check;
+                int tx = x0 + S(28);
+                title.Bounds = new Rectangle(tx, uy + S(9), Math.Max(S(40), shown.Left - S(12) - tx), S(22));
+                detail.Bounds = new Rectangle(tx, uy + S(33), Math.Max(S(40), right - tx), S(20));
+            };
+
+            check.Click += delegate
+            {
+                if (Demo.Active) return;
+                show(new UpdateStatus(UpdateKind.Checking, "Prüfe auf GitHub …", ""));
+                Updater.CheckAsync(settings, this, true, delegate (UpdateStatus st)
+                {
+                    if (!IsDisposed) show(st);
+                });
+            };
+            install.Click += delegate
+            {
+                Close();
+                if (StartInstall != null) StartInstall();
+            };
+            page.Click += delegate { Updater.OpenPage(); };
+            show(Updater.Status(settings));
+
+            // Automatisch prüfen: Text bündig mit den Werten darüber, Schalter rechts
+            int ay = uy + S(60);
+            ToggleSwitch auto = new ToggleSwitch();
+            auto.Size = new Size(S(44), S(22));
+            auto.Location = new Point(right - S(2) - auto.Width, ay + (S(32) - auto.Height) / 2);
+            auto.BackColor = _card;
+            auto.Checked = settings.UpdateCheck;
+            auto.CheckedChanged += delegate
+            {
+                if (Demo.Active || LiveSettings == null) return;
+                settings.UpdateCheck = auto.Checked; // gilt sofort und wird gespeichert
+                settings.Save();
+            };
+            card.Controls.Add(auto);
+            Label autoText = new Label();
+            autoText.Text = "Automatisch prüfen";
+            autoText.ForeColor = _text;
+            autoText.BackColor = _card;
+            autoText.TextAlign = ContentAlignment.MiddleLeft;
+            autoText.AutoEllipsis = true;
+            autoText.Cursor = Cursors.Hand;
+            autoText.Bounds = new Rectangle(x0, ay, auto.Left - S(8) - x0, S(32));
+            autoText.Click += delegate { auto.Checked = !auto.Checked; };
+            card.Controls.Add(autoText);
+        }
+
         internal Color BackColorUi { get { return _back; } }
         internal Color CardColorUi { get { return _card; } }
         internal Color BorderColorUi { get { return _border; } }
         internal Color TextColorUi { get { return _text; } }
+        internal Color MutedColorUi { get { return _muted; } }
 
         private static void Open(string path, bool notepadFallback)
         {
@@ -271,6 +406,38 @@ namespace WindowGrid
             }
         }
 
+        /// <summary>Symbol des Update-Stands (Segoe Fluent Icons, 11 pt, nach Pixeln zentriert).</summary>
+        private sealed class StatusGlyph : Control
+        {
+            private readonly float k;
+            private char _glyph;
+            private Color _color;
+
+            public StatusGlyph(float scale)
+            {
+                k = scale;
+                SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer, true);
+            }
+
+            public void Set(char glyph, Color color)
+            {
+                _glyph = glyph;
+                _color = color;
+                Invalidate();
+            }
+
+            protected override void OnPaint(PaintEventArgs e)
+            {
+                e.Graphics.Clear(BackColor);
+                if (_glyph == '\0') return;
+                int gs = (int)Math.Round(11f * 96f / 72f * k);
+                Image img = MenuHelper.Glyph(_glyph, _color, gs);
+                if (img == null) return;
+                e.Graphics.DrawImage(img, (Width - gs) / 2, (Height - gs) / 2, gs, gs);
+                img.Dispose();
+            }
+        }
+
         /// <summary>Knopf mit Symbol, Breite passt sich dem Text an (wie ModernButton in den anderen Programmen).</summary>
         private sealed class DialogButton : Button
         {
@@ -281,6 +448,9 @@ namespace WindowGrid
             private readonly char _glyph;
 
             public DialogButton(string text, char glyph, bool primary, float scale, AboutDialog owner)
+                : this(text, glyph, primary, scale, owner, 40) { }
+
+            public DialogButton(string text, char glyph, bool primary, float scale, AboutDialog owner, int heightUnits)
             {
                 k = scale;
                 _owner = owner;
@@ -295,23 +465,25 @@ namespace WindowGrid
                 AutoSize = false;
                 int tw = TextRenderer.MeasureText(Text, Font).Width;
                 int icon = _glyph == '\0' ? 0 : (int)(26 * k);
-                Size = new Size(tw + icon + (int)(36 * k), (int)(40 * k));
+                Size = new Size(tw + icon + (int)(36 * k), (int)(heightUnits * k));
             }
 
             protected override void OnMouseEnter(EventArgs e) { _hover = true; Invalidate(); base.OnMouseEnter(e); }
             protected override void OnMouseLeave(EventArgs e) { _hover = false; _down = false; Invalidate(); base.OnMouseLeave(e); }
             protected override void OnMouseDown(MouseEventArgs e) { _down = true; Invalidate(); base.OnMouseDown(e); }
             protected override void OnMouseUp(MouseEventArgs e) { _down = false; Invalidate(); base.OnMouseUp(e); }
+            protected override void OnEnabledChanged(EventArgs e) { Invalidate(); base.OnEnabledChanged(e); }
+            protected override bool ShowFocusCues { get { return false; } }
 
             protected override void OnPaint(PaintEventArgs e)
             {
                 Graphics g = e.Graphics;
-                g.Clear(_owner.BackColorUi);
+                g.Clear(Parent != null ? Parent.BackColor : _owner.BackColorUi);
                 g.SmoothingMode = SmoothingMode.AntiAlias;
                 RectangleF r = new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f);
                 bool dark = Theme.IsDark;
                 Color fill, text, border;
-                if (_primary)
+                if (_primary && Enabled)
                 {
                     // Akzentfarbe wie Windows 11: hell = etwas dunkler, dunkel = etwas heller
                     Color baseColor = dark ? Theme.Blend(Theme.Accent, Color.White, 0.35f) : Theme.Blend(Theme.Accent, Color.Black, 0.12f);
@@ -324,10 +496,11 @@ namespace WindowGrid
                 else
                 {
                     Color card = _owner.CardColorUi;
-                    fill = _down ? Theme.Blend(card, dark ? Color.White : Color.Black, 0.08f)
+                    fill = !Enabled ? card
+                         : _down ? Theme.Blend(card, dark ? Color.White : Color.Black, 0.08f)
                          : _hover ? Theme.Blend(card, dark ? Color.White : Color.Black, 0.04f)
                          : card;
-                    text = _owner.TextColorUi;
+                    text = Enabled ? _owner.TextColorUi : _owner.MutedColorUi;
                     border = _owner.BorderColorUi;
                 }
                 using (GraphicsPath p = Theme.RoundRect(r, 6 * k))

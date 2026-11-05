@@ -405,9 +405,13 @@ namespace WindowGrid
         public const char Startup = '\uE7B5';
         public const char History = '\uE81C';
         public const char Info = '\uE946';
+        public const char Download = '\uE896';
         public const char Auto = '\uE945';
         public const char Pause = '\uE769';
         public const char Shield = '\uEA18';
+        public const char Completed = '\uE930';
+        public const char Warning = '\uE7BA';
+        public const char Link = '\uE71B';
 
         private static string IconFont()
         {

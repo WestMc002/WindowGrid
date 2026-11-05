@@ -32,6 +32,9 @@ namespace WindowGrid
         private readonly RegisteredWaitHandle _showWait;
         private readonly Control _invoker;
         private SettingsForm _form;
+        private readonly System.Windows.Forms.Timer _updateTimer;
+        private bool _balloonIsUpdate;
+        private string _notifiedVersion;
 
         /// <summary>Nur für die Screenshots: Menü mit Beispieldaten, ohne Tray-Symbol und ohne Hooks.</summary>
         private TrayContext(Settings settings, Icon appIcon)
@@ -48,7 +51,10 @@ namespace WindowGrid
             return new TrayContext(settings, appIcon)._menu;
         }
 
-        public TrayContext()
+        public TrayContext() : this(false) { }
+
+        /// <param name="afterUpdate">Neustart durch das Update-Skript (--nach-update): Ergebnis anzeigen.</param>
+        public TrayContext(bool afterUpdate)
         {
             _invoker = new Control();
             IntPtr h = _invoker.Handle;
@@ -62,6 +68,7 @@ namespace WindowGrid
             _engine = new GridEngine(_settings);
             _engine.Start();
             SnapBar.Cleanup(_settings); // Änderung einer früheren Version einmalig zurücksetzen
+            Autostart.UpdateMovedPath(); // Programmordner verschoben: Autostart auf den neuen Pfad umstellen
 
             _menu = new ContextMenuStrip();
             BuildMenu();
@@ -94,6 +101,55 @@ namespace WindowGrid
                     ToolTipIcon.Info);
             }
             WarnIfOldVersionRunning();
+
+            // ---------- Updates (Vorlage: Fensterpositionen wiederherstellen) ----------
+            if (afterUpdate)
+            {
+                string result = Updater.LastResult();
+                if (result != null && result.StartsWith("OK"))
+                    _tray.ShowBalloonTip(6000, "WindowGrid aktualisiert", "Version " + result.Substring(2).Trim() + " ist installiert.", ToolTipIcon.Info);
+                else if (result != null)
+                    _tray.ShowBalloonTip(8000, "Update fehlgeschlagen",
+                        result.Replace("FEHLER", "").Trim() + " – die bisherige Version läuft weiter.", ToolTipIcon.Warning);
+            }
+            AboutDialog.LiveSettings = _settings;
+            AboutDialog.StartInstall = delegate
+            {
+                _invoker.BeginInvoke((MethodInvoker)delegate { Updater.InstallInteractive(VisibleForm, _invoker, null); });
+            };
+            Updater.AvailableChanged += delegate { NotifyUpdate(); };
+            Updater.ExitRequested += delegate { ExitApp(); };
+            _tray.BalloonTipClicked += delegate
+            {
+                if (_balloonIsUpdate) Updater.InstallInteractive(VisibleForm, _invoker, null);
+            };
+            _tray.BalloonTipClosed += delegate { _balloonIsUpdate = false; };
+            // still im Hintergrund: 20 Sekunden nach dem Start, danach alle 6 Stunden nachsehen,
+            // ob die Prüfung fällig ist (höchstens alle 20 Stunden, abschaltbar im Info-Fenster)
+            _updateTimer = new System.Windows.Forms.Timer();
+            _updateTimer.Interval = 20000;
+            _updateTimer.Tick += delegate
+            {
+                _updateTimer.Interval = 6 * 60 * 60 * 1000;
+                if (Updater.Due(_settings)) Updater.CheckAsync(_settings, _invoker, false, null);
+            };
+            _updateTimer.Start();
+        }
+
+        private Form VisibleForm
+        {
+            get { return _form != null && !_form.IsDisposed && _form.Visible ? _form : null; }
+        }
+
+        /// <summary>Hinweis im Infobereich, einmal je Version und Programmstart; Klick startet das Update.</summary>
+        private void NotifyUpdate()
+        {
+            ReleaseInfo r = Updater.Available;
+            if (r == null || r.Version == _notifiedVersion) return;
+            _notifiedVersion = r.Version;
+            _balloonIsUpdate = true;
+            _tray.ShowBalloonTip(10000, "WindowGrid " + r.Version + " ist verfügbar",
+                "Installiert ist " + AppInfo.Version + ". Klicken, um jetzt zu aktualisieren.", ToolTipIcon.Info);
         }
 
         private static string ShortVersion
@@ -182,6 +238,17 @@ namespace WindowGrid
             header.Size = header.GetPreferredSize(Size.Empty);
             _menu.Items.Add(header);
             _menu.Items.Add(new ToolStripSeparator());
+
+            // ---------- Update verfügbar ----------
+            ReleaseInfo update = Demo.Active ? null : Updater.Available;
+            if (update != null)
+            {
+                GlyphMenuItem upd = Item("Update auf " + update.Version + " installieren …", MenuHelper.Download,
+                    delegate { Updater.InstallInteractive(VisibleForm, _invoker, null); });
+                upd.Font = new Font(_menu.Font, FontStyle.Bold);
+                _menu.Items.Add(upd);
+                _menu.Items.Add(new ToolStripSeparator());
+            }
 
             // ---------- Einträge ----------
             GlyphMenuItem settings = Item("Einstellungen …", MenuHelper.Settings, ShowSettings);
@@ -317,6 +384,7 @@ namespace WindowGrid
         private void ExitApp()
         {
             if (_form != null && !_form.IsDisposed) _form.Close();
+            if (_updateTimer != null) _updateTimer.Stop();
             _tray.Visible = false;
             _showWait.Unregister(null);
             _engine.Dispose();

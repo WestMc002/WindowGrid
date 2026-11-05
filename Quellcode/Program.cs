@@ -28,7 +28,8 @@ namespace WindowGrid
             using (Mutex mutex = new Mutex(true, "WindowGrid_Modern_SingleInstance", out created))
             {
                 // Neustart mit Adminrechten: warten, bis sich die alte Instanz beendet hat
-                bool restart = Array.Exists(args, a => string.Equals(a, "/neustart", StringComparison.OrdinalIgnoreCase));
+                bool afterUpdate = Array.Exists(args, a => string.Equals(a, "--nach-update", StringComparison.OrdinalIgnoreCase));
+                bool restart = afterUpdate || Array.Exists(args, a => string.Equals(a, "/neustart", StringComparison.OrdinalIgnoreCase));
                 if (!created && restart)
                 {
                     try { created = mutex.WaitOne(10000); }
@@ -58,7 +59,7 @@ namespace WindowGrid
                     MessageBox.Show("Unerwarteter Fehler:\n\n" + e.Exception.Message, "WindowGrid",
                         MessageBoxButtons.OK, MessageBoxIcon.Error);
                 };
-                Application.Run(new TrayContext());
+                Application.Run(new TrayContext(afterUpdate));
                 GC.KeepAlive(mutex);
             }
             return 0;

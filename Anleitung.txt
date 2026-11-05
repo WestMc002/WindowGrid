@@ -84,6 +84,28 @@ Weitere Tasten während das Raster sichtbar ist
 - Esc                             -> Raster aus (zweites Esc bricht das Ziehen ab)
 - Maus auf anderen Monitor        -> Raster wechselt mit
 
+Updates
+-------
+WindowGrid sieht beim Start (nach 20 Sekunden) still auf GitHub nach, ob es eine
+neue Version gibt – höchstens einmal täglich:
+https://github.com/WestMc002/WindowGrid/releases
+Gibt es eine, erscheinen
+  - ein Hinweis im Infobereich (Klick darauf startet das Update),
+  - im Tray-Menü oben der Eintrag "Update auf <Version> installieren …",
+  - im Einstellungsfenster oben eine Hinweisleiste mit "Jetzt aktualisieren",
+    "Release-Seite" und "Später".
+"Jetzt aktualisieren" lädt das ZIP von GitHub, beendet WindowGrid, ersetzt
+WindowGrid.exe und Anleitung.txt und startet WindowGrid neu. Die Einstellungen
+(WindowGrid.ini) bleiben erhalten. Liegt WindowGrid in einem Ordner ohne
+Schreibrechte (z. B. unter Programme), fragt Windows einmal nach Administratorrechten.
+Im Projektordner (mit Erstellen.bat) wird nicht automatisch ersetzt – dort öffnet
+sich stattdessen die Release-Seite.
+Im Fenster "Info über WindowGrid" stehen unter "Updates" der Stand (aktuell,
+neue Version oder Fehler) und das Datum der letzten Prüfung. Daneben prüft
+"Jetzt prüfen" sofort; bei einer neuen Version steht dort "Aktualisieren".
+Mit dem Schalter "Automatisch prüfen" lässt sich die Prüfung beim Start abschalten.
+Übertragen wird nur die Programmversion (von GitHub verlangt), keine persönlichen Daten.
+
 Tray-Symbol (unten rechts neben der Uhr)
 ----------------------------------------
 - Linksklick        -> Einstellungen

@@ -37,6 +37,7 @@ The program interface is in German.
 - Works on **multiple monitors** and with **per-monitor DPI scaling**
 - **Tray icon** with a Windows 11 style menu, light/dark mode and Windows accent color
 - **Autostart**, optionally **with administrator rights** (via Task Scheduler) to arrange windows of elevated programs
+- **Updates:** checks GitHub for a new version at startup (at most once a day) and updates itself with one click – settings are kept
 - **Portable:** settings in `WindowGrid.ini` next to the EXE
 
 ### Installation
@@ -78,6 +79,7 @@ Fenster beim Ziehen per Raster anordnen – ein moderner Nachbau der bekannten W
 - Funktioniert mit **mehreren Monitoren** und **unterschiedlicher Skalierung je Monitor**
 - **Tray-Symbol** mit Menü im Windows-11-Stil, Hell/Dunkel und Windows-Akzentfarbe
 - **Autostart**, wahlweise **mit Administratorrechten** (über die Aufgabenplanung), um auch Fenster von Programmen mit Adminrechten anzuordnen
+- **Updates:** sieht beim Start (höchstens einmal täglich) auf GitHub nach einer neuen Version und aktualisiert sich auf Klick selbst – die Einstellungen bleiben erhalten
 - **Portabel:** Einstellungen in `WindowGrid.ini` neben der EXE
 
 Die ausführliche Anleitung steht in [Anleitung.txt](Anleitung.txt).

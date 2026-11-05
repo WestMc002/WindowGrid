@@ -50,6 +50,8 @@ namespace WindowGrid
         public RectangleF LastSelection = RectangleF.Empty; // in % des Arbeitsbereichs
         public bool Paused = false;
         public bool FirstRun = true;
+        public bool UpdateCheck = true;           // beim Start auf GitHub nach neuen Versionen sehen (höchstens einmal täglich)
+        public string LastUpdateCheck = "";       // Zeitpunkt der letzten erfolgreichen Prüfung (UTC, ISO 8601)
 
         private static string _filePath;
 
@@ -79,6 +81,7 @@ namespace WindowGrid
             for (int i = 0; i < o.Zones.Length; i++) Zones[i] = o.Zones[i].Clone();
             LastSelection = o.LastSelection;
             Paused = o.Paused; FirstRun = o.FirstRun;
+            UpdateCheck = o.UpdateCheck; LastUpdateCheck = o.LastUpdateCheck;
         }
 
         private static string LocalPath
@@ -146,6 +149,9 @@ namespace WindowGrid
                 if (values.TryGetValue("LetzteAuswahl", out last)) s.LastSelection = ParseRect(last);
                 s.Paused = GetBool(values, "Pausiert", s.Paused);
                 s.FirstRun = GetBool(values, "ErsterStart", s.FirstRun);
+                s.UpdateCheck = GetBool(values, "UpdatesPruefen", s.UpdateCheck);
+                string lastCheck;
+                if (values.TryGetValue("LetzteUpdatePruefung", out lastCheck)) s.LastUpdateCheck = lastCheck.Trim();
             }
             catch { }
             return s;
@@ -210,6 +216,9 @@ namespace WindowGrid
             sb.AppendLine("[Allgemein]");
             sb.AppendLine("Pausiert=" + B(Paused));
             sb.AppendLine("AlsAdministrator=" + B(RunAsAdmin));
+            sb.AppendLine("; Beim Start auf GitHub nach einer neuen Version sehen, höchstens einmal täglich (1 = ja)");
+            sb.AppendLine("UpdatesPruefen=" + B(UpdateCheck));
+            sb.AppendLine("LetzteUpdatePruefung=" + LastUpdateCheck);
             sb.AppendLine("; Ursprünglicher Windows-Wert aus einer früheren Version (wird beim Start zurückgesetzt, -1 = nichts zu tun)");
             sb.AppendLine("AndocklayoutsVorher=" + SnapBarOriginal);
             sb.AppendLine("[Schnellzonen]");

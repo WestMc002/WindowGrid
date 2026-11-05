@@ -667,7 +667,7 @@ namespace WindowGrid
     {
         public VersionPill() { TabStop = true; }
 
-        protected override int BaseHeight { get { return 26; } }
+        protected override int BaseHeight { get { return 21; } }
 
         protected override void OnKeyDown(KeyEventArgs e)
         {
@@ -690,10 +690,11 @@ namespace WindowGrid
                 using (SolidBrush b = new SolidBrush(Theme.WithAlpha(accent, Hover ? 55 : 28))) g.FillPath(b, path);
                 using (Pen pen = new Pen(Theme.WithAlpha(accent, Hover ? 140 : 70), 1f)) g.DrawPath(pen, path);
             }
-            using (Font f = Theme.UiFont(12.5f * sc, FontStyle.Regular))
-            using (SolidBrush b = new SolidBrush(textColor))
-            using (StringFormat sf = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center })
-                g.DrawString(Text, f, b, new RectangleF(0, 0, Width, Height), sf);
+            // Text waagrecht und senkrecht mittig, mit TextRenderer ohne Innenabstand (wie gemessen)
+            using (Font f = Theme.UiFont(10.5f * sc, FontStyle.Regular))
+                TextRenderer.DrawText(g, Text, f, new Rectangle(0, 0, Width, Height), textColor,
+                    TextFormatFlags.NoPadding | TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix |
+                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
         }
     }
 

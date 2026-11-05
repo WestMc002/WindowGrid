@@ -82,6 +82,27 @@ namespace WindowGrid
             }
         }
 
+        /// <summary>
+        /// Nach dem Verschieben des Programmordners: Zeigt der Autostart-Eintrag auf eine EXE, die es
+        /// nicht mehr gibt, wird er auf den aktuellen Pfad umgestellt. Ein Eintrag auf eine vorhandene
+        /// andere EXE (z. B. eine zweite Kopie) bleibt unverändert.
+        /// </summary>
+        public static void UpdateMovedPath()
+        {
+            try
+            {
+                using (RegistryKey key = Registry.CurrentUser.OpenSubKey(RunKey, true))
+                {
+                    if (key == null) return;
+                    string v = key.GetValue(ValueName) as string;
+                    if (v == null || string.Equals(v, Command, StringComparison.OrdinalIgnoreCase)) return;
+                    string old = v.Trim().Trim('"');
+                    if (!File.Exists(old)) key.SetValue(ValueName, Command);
+                }
+            }
+            catch { }
+        }
+
         public static bool IsEnabled
         {
             get { return RunKeyEnabled || TaskExists; }

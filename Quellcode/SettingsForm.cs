@@ -5,6 +5,7 @@
 
 using System;
 using System.Drawing;
+using System.Drawing.Drawing2D;
 using System.Windows.Forms;
 using Microsoft.Win32;
 
@@ -33,6 +34,9 @@ namespace WindowGrid
         private ModernButton _btnSave, _btnCancel, _btnDefaults;
         private Card[] _cards;
         private PictureBox _logo;
+        private UpdateBar _bar;
+        private bool _barShown;
+        private readonly EventHandler _onUpdateChanged;
 
         public SettingsForm(Settings settings, Icon icon)
         {
@@ -60,9 +64,42 @@ namespace WindowGrid
             ApplyTheme();
 
             SystemEvents.UserPreferenceChanged += OnUserPreferenceChanged;
+
+            // Hinweisleiste oben, wenn auf GitHub eine neuere Version liegt (wie in Fensterpositionen)
+            _onUpdateChanged = delegate { if (!IsDisposed) ShowUpdateBar(Updater.Available != null); };
+            Updater.AvailableChanged += _onUpdateChanged;
+            ShowUpdateBar(!Demo.Active && Updater.Available != null);
+        }
+
+        private void ShowUpdateBar(bool show)
+        {
+            ReleaseInfo r = Updater.Available;
+            show = show && r != null;
+            if (show)
+            {
+                _bar.Text = "Neue Version " + r.Version + " verfügbar – installiert ist " + AppInfo.Version + ".";
+                _bar.Invalidate();
+            }
+            if (show == _barShown) return;
+            int d = S(64) * (show ? 1 : -1);
+            foreach (Control c in Controls)
+                if (c != _bar && c.Dock == DockStyle.None && c.Top >= S(80)) c.Top += d;
+            bool fixedSize = MinimumSize != Size.Empty;
+            MinimumSize = Size.Empty;
+            MaximumSize = Size.Empty;
+            ClientSize = new Size(ClientSize.Width, ClientSize.Height + d);
+            if (fixedSize) { MinimumSize = Size; MaximumSize = Size; }
+            if (IsHandleCreated)
+            {
+                Rectangle work = Screen.FromControl(this).WorkingArea;
+                if (Bottom > work.Bottom) Top = Math.Max(work.Top, work.Bottom - Height);
+            }
+            _bar.Visible = show;
+            _barShown = show;
         }
 
         private int S(float v) { return (int)Math.Round(v * _sc); }
+
 
         // ------------------------------------------------------------------ Aufbau
 
@@ -75,8 +112,17 @@ namespace WindowGrid
             try { _logo.Image = Theme.IconToBitmap(icon, S(48)); } catch { }
             Controls.Add(_logo);
 
-            Label title = MakeLabel("WindowGrid", 22f, true, false);
-            title.Location = new Point(S(80), S(18));
+            // Name ohne Innenabstand gezeichnet (wie gemessen) – so stimmt der Abstand zur Versions-Plakette genau.
+            // Links um den früheren Innenabstand eingerückt, damit der Name an derselben Stelle steht wie bisher.
+            Label title = new NoPaddingLabel();
+            title.Text = "WindowGrid";
+            title.AutoSize = true;
+            title.Font = Theme.UiFont(22f * _sc, FontStyle.Bold);
+            title.UseMnemonic = false;
+            TextFormatFlags np = TextFormatFlags.NoPadding | TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix;
+            Size ts = TextRenderer.MeasureText(title.Text, title.Font, Size.Empty, np);
+            int indent = (TextRenderer.MeasureText(title.Text, title.Font, Size.Empty, TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix).Width - ts.Width) / 2;
+            title.Location = new Point(S(80) + indent, S(18));
             Controls.Add(title);
 
             Label subtitle = MakeLabel("Fenster beim Ziehen per Raster anordnen", 13.5f, false, true);
@@ -87,12 +133,35 @@ namespace WindowGrid
             VersionPill version = new VersionPill();
             version.Text = "Version " + AppInfo.Version;
             int vw;
-            using (Graphics g = CreateGraphics())
-            using (Font vf = Theme.UiFont(12.5f * _sc, FontStyle.Regular))
-                vw = (int)g.MeasureString(version.Text, vf).Width + S(26);
-            version.Bounds = new Rectangle(S(736) - vw, S(28), vw, S(26));
+            using (Font vf = Theme.UiFont(10.5f * _sc, FontStyle.Regular))
+                vw = TextRenderer.MeasureText(version.Text, vf, Size.Empty, np).Width + S(16); // Innenabstand je 8
+            // direkt rechts neben dem Programmnamen (globale Vorgabe, Referenz Wake on LAN HeaderPanel), senkrecht mittig.
+            // Abstand ab dem letzten sichtbaren Pixel des Namens: 12 × Skalierung + 1 für den Rand des letzten Buchstabens
+            // (wie bei Wake on LAN sichtbar). Nicht ab der gemessenen Textbreite: Bei "Segoe UI Variable" meldet
+            // TextRenderer für Halbfett eine zu große Breite, der Abstand wirkte dadurch viel größer.
+            int inkRight = NoPaddingLabel.InkRight(title);
+            int textEnd = inkRight > 0 ? inkRight : ts.Width;
+            version.Bounds = new Rectangle(title.Left + textEnd + S(13), title.Top + (ts.Height - S(21)) / 2, vw, S(21));
             version.Click += delegate { AboutDialog.ShowFor(this); };
             Controls.Add(version);
+
+            // Hinweisleiste "Neue Version verfügbar" (nur sichtbar, wenn es ein Update gibt)
+            _bar = new UpdateBar(_sc);
+            _bar.Bounds = new Rectangle(S(24), S(84), S(712), S(52));
+            _bar.Visible = false;
+            _bar.Install.Click += delegate
+            {
+                Updater.InstallInteractive(this, this, delegate (bool busy)
+                {
+                    _bar.Install.Enabled = _bar.Page.Enabled = _bar.Later.Enabled = !busy;
+                    if (busy) _bar.Text = "Lade Version " + Updater.Available.Version + " …";
+                    else ShowUpdateBar(true);
+                    _bar.Invalidate();
+                });
+            };
+            _bar.Page.Click += delegate { Updater.OpenPage(); };
+            _bar.Later.Click += delegate { ShowUpdateBar(false); };
+            Controls.Add(_bar);
 
             int top = S(88);
             int colW = S(348);
@@ -192,7 +261,7 @@ namespace WindowGrid
             _btnDefaults = MakeButton("Standardwerte", false, new Rectangle(leftX, by, S(140), S(34)));
             _btnCancel = MakeButton("Abbrechen", false, new Rectangle(S(736) - S(120) - S(10) - S(120), by, S(120), S(34)));
             _btnSave = MakeButton("Speichern", true, new Rectangle(S(736) - S(120), by, S(120), S(34)));
-            _btnDefaults.Click += delegate { Settings d = new Settings(); d.FirstRun = false; d.Paused = _edit.Paused; d.LastSelection = _edit.LastSelection; _edit.CopyFrom(d); LoadValues(false); };
+            _btnDefaults.Click += delegate { Settings d = new Settings(); d.FirstRun = false; d.Paused = _edit.Paused; d.LastSelection = _edit.LastSelection; d.LastUpdateCheck = _edit.LastUpdateCheck; d.UpdateCheck = _edit.UpdateCheck; _edit.CopyFrom(d); LoadValues(false); };
             _btnCancel.Click += delegate { Close(); };
             _btnSave.Click += delegate { Save(); };
 
@@ -401,6 +470,8 @@ namespace WindowGrid
             // Die letzte Auswahl merkt sich WindowGrid laufend – nicht mit dem Stand beim Öffnen überschreiben
             _edit.LastSelection = _original.LastSelection;
             _edit.SnapBarOriginal = _original.SnapBarOriginal;
+            _edit.LastUpdateCheck = _original.LastUpdateCheck;
+            _edit.UpdateCheck = _original.UpdateCheck; // wird im Info-Fenster eingestellt
             bool adminChanged = _edit.RunAsAdmin != _original.RunAsAdmin;
             bool autoWanted = _autostart.Checked;
             bool autoNow = Autostart.IsEnabled;
@@ -515,9 +586,131 @@ namespace WindowGrid
             if (disposing)
             {
                 SystemEvents.UserPreferenceChanged -= OnUserPreferenceChanged;
+                Updater.AvailableChanged -= _onUpdateChanged;
                 if (_logo != null && _logo.Image != null) _logo.Image.Dispose();
             }
             base.Dispose(disposing);
+        }
+    }
+    /// <summary>Label, das seinen Text ohne Innenabstand zeichnet und misst (TextRenderer mit NoPadding).</summary>
+    internal sealed class NoPaddingLabel : Label
+    {
+        private const TextFormatFlags Flags = TextFormatFlags.NoPadding | TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix;
+
+        public NoPaddingLabel()
+        {
+            SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer, true);
+        }
+
+        public override Size GetPreferredSize(Size proposedSize)
+        {
+            return TextRenderer.MeasureText(Text, Font, Size.Empty, Flags);
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            e.Graphics.Clear(BackColor);
+            TextRenderer.DrawText(e.Graphics, Text, Font, Point.Empty, ForeColor, BackColor, Flags);
+        }
+
+        /// <summary>Rechter Rand der tatsächlich gezeichneten Schrift (Pixel ab links, 0 = nicht ermittelbar).</summary>
+        public static int InkRight(Label label)
+        {
+            Size size = TextRenderer.MeasureText(label.Text, label.Font, Size.Empty, Flags);
+            int w = size.Width + size.Height, h = size.Height; // mit Reserve, falls die Messung zu knapp ist
+            if (w <= 0 || h <= 0) return 0;
+            try
+            {
+                using (Bitmap bmp = new Bitmap(w, h, System.Drawing.Imaging.PixelFormat.Format24bppRgb))
+                {
+                    using (Graphics g = Graphics.FromImage(bmp))
+                    {
+                        g.Clear(Color.White);
+                        TextRenderer.DrawText(g, label.Text, label.Font, Point.Empty, Color.Black, Color.White, Flags);
+                    }
+                    for (int x = w - 1; x >= 0; x--)
+                        for (int y = 0; y < h; y++)
+                        {
+                            Color c = bmp.GetPixel(x, y);
+                            if (c.R < 160 || c.G < 160 || c.B < 160) return x + 1;
+                        }
+                }
+            }
+            catch { }
+            return 0;
+        }
+    }
+
+    /// <summary>
+    /// Hinweisleiste "Neue Version verfügbar" mit "Jetzt aktualisieren", "Release-Seite" und "Später"
+    /// (Vorlage: Fensterpositionen wiederherstellen).
+    /// </summary>
+    internal sealed class UpdateBar : Control
+    {
+        public readonly ModernButton Install = new ModernButton();
+        public readonly ModernButton Page = new ModernButton();
+        public readonly ModernButton Later = new ModernButton();
+        private readonly float _sc;
+
+        public UpdateBar(float scale)
+        {
+            _sc = scale;
+            SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer |
+                     ControlStyles.ResizeRedraw | ControlStyles.SupportsTransparentBackColor, true);
+            Install.Text = "Jetzt aktualisieren";
+            Install.Primary = true;
+            Page.Text = "Release-Seite";
+            Later.Text = "Später";
+            Install.Size = new Size(S(150), S(32));
+            Page.Size = new Size(S(116), S(32));
+            Later.Size = new Size(S(80), S(32));
+            Controls.Add(Install);
+            Controls.Add(Page);
+            Controls.Add(Later);
+        }
+
+        private int S(float v) { return (int)Math.Round(v * _sc); }
+
+        protected override void OnTextChanged(EventArgs e) { base.OnTextChanged(e); Invalidate(); }
+
+        protected override void OnLayout(LayoutEventArgs e)
+        {
+            base.OnLayout(e);
+            int x = Width - S(10);
+            foreach (ModernButton b in new[] { Later, Page, Install })
+            {
+                x -= b.Width;
+                b.Location = new Point(x, (Height - b.Height) / 2);
+                x -= S(8);
+            }
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            Graphics g = e.Graphics;
+            Palette p = Theme.Current;
+            g.Clear(p.Back);
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            RectangleF r = new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f);
+            using (GraphicsPath path = Theme.RoundRect(r, 8f * _sc))
+            using (SolidBrush brush = new SolidBrush(Theme.Blend(p.Back, Theme.Accent, 0.14f)))
+            using (Pen pen = new Pen(Theme.Blend(p.Back, Theme.Accent, 0.45f)))
+            {
+                g.FillPath(brush, path);
+                g.DrawPath(pen, path);
+            }
+            int x = S(16);
+            if (Theme.IconFontName != null)
+            {
+                using (Font icon = new Font(Theme.IconFontName, 14f * _sc, GraphicsUnit.Pixel))
+                    TextRenderer.DrawText(g, MenuHelper.Download.ToString(), icon, new Rectangle(x, 0, S(20), Height), Theme.Accent,
+                        TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.NoPadding);
+                x += S(34);
+            }
+            int right = Install.Left - S(12);
+            using (Font f = Theme.UiFont(13.5f * _sc, FontStyle.Bold))
+                TextRenderer.DrawText(g, Text, f, new Rectangle(x, 0, Math.Max(10, right - x), Height), p.Text,
+                    TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
         }
     }
 }
