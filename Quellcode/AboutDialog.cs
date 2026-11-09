@@ -125,7 +125,7 @@ namespace WindowGrid
             InfoCard card = new InfoCard(k, _card, _border, _back);
             card.Location = new Point(S(24), y);
             card.Size = new Size(W - S(48), S(18) * 2 + rowCount * S(26) + S(60) + S(32)); // + Zeilen Updates und Automatisch prüfen
-            ToolTip tip = new ToolTip();
+            ToolTip tip = new ModernToolTip();
             for (int i = 0; i < rowCount; i++)
             {
                 int ry = S(18) + i * S(26);
@@ -236,7 +236,7 @@ namespace WindowGrid
             DialogButton check = new DialogButton("Jetzt prüfen", MenuHelper.Refresh, false, k, this, 30);
             DialogButton install = new DialogButton("Aktualisieren", MenuHelper.Download, true, k, this, 30);
             DialogButton page = new DialogButton("Release-Seite", MenuHelper.Link, false, k, this, 30);
-            ToolTip tip = new ToolTip();
+            ToolTip tip = new ModernToolTip();
             tip.SetToolTip(install, "WindowGrid beenden, auf die neue Version aktualisieren und neu starten");
             foreach (DialogButton b in new DialogButton[] { check, install, page })
             {

@@ -261,4 +261,36 @@ namespace WindowGrid
             }
         }
     }
+
+    /// <summary>
+    /// Tooltip im Programmdesign (globale Vorgabe „Weitere Fenster“, Referenz Wake on LAN): Kartenfarbe, 1 px Rand,
+    /// Text in Textfarbe, Segoe UI 9 pt, Innenabstand 10 × 6, Umbruch bei 400 (je × Skalierung).
+    /// </summary>
+    internal sealed class ModernToolTip : ToolTip
+    {
+        private static readonly Font TipFont = new Font("Segoe UI", 9f);
+        private const TextFormatFlags Flags = TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix | TextFormatFlags.Left | TextFormatFlags.Top;
+
+        public ModernToolTip()
+        {
+            OwnerDraw = true;
+            Popup += delegate (object s, PopupEventArgs e)
+            {
+                float k;
+                using (Graphics g = Graphics.FromHwnd(IntPtr.Zero)) k = g.DpiX / 96f;
+                string text = GetToolTip(e.AssociatedControl) ?? "";
+                Size size = TextRenderer.MeasureText(text, TipFont, new Size((int)(400 * k), 0), Flags);
+                e.ToolTipSize = new Size(size.Width + (int)(20 * k), size.Height + (int)(12 * k));
+            };
+            Draw += delegate (object s, DrawToolTipEventArgs e)
+            {
+                float k = e.Graphics.DpiX / 96f;
+                Palette p = Theme.Current;
+                using (SolidBrush back = new SolidBrush(p.Card)) e.Graphics.FillRectangle(back, e.Bounds);
+                using (Pen pen = new Pen(p.CardBorder)) e.Graphics.DrawRectangle(pen, 0, 0, e.Bounds.Width - 1, e.Bounds.Height - 1);
+                Rectangle r = new Rectangle((int)(10 * k), (int)(6 * k), e.Bounds.Width - (int)(20 * k), e.Bounds.Height - (int)(12 * k));
+                TextRenderer.DrawText(e.Graphics, e.ToolTipText, TipFont, r, p.Text, Flags);
+            };
+        }
+    }
 }

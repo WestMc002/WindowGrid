@@ -187,7 +187,7 @@ namespace WindowGrid
             AddRow(general, "Mit Windows starten", _autostart, S(20));
             _runAdmin = MakeToggle();
             Label adminLabel = AddRow(general, "Mit Administratorrechten", _runAdmin, S(58));
-            ToolTip adminTip = new ToolTip();
+            ToolTip adminTip = new ModernToolTip();
             adminTip.SetToolTip(adminLabel,
                 "Nötig, damit WindowGrid auch Fenster von Programmen anordnen kann,\n" +
                 "die als Administrator laufen. Der Autostart läuft dann über die\n" +
