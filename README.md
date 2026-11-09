@@ -38,12 +38,12 @@ The program interface is in German.
 - **Tray icon** with a Windows 11 style menu, light/dark mode and Windows accent color
 - **Autostart**, optionally **with administrator rights** (via Task Scheduler) to arrange windows of elevated programs
 - **Updates:** checks GitHub for a new version at startup (at most once a day) and updates itself with one click – settings are kept
-- **Portable:** settings in `WindowGrid.ini` next to the EXE
+- **No installation:** extract and start – settings are stored in `%LOCALAPPDATA%\WindowGrid\WindowGrid.ini`
 
 ### Installation
 
 1. Download the ZIP `WindowGrid-<version>.zip` from the [Releases](https://github.com/WestMc002/WindowGrid/releases).
-2. Extract it into a folder of its own with write access (e.g. `C:\Tools\WindowGrid`) and start `WindowGrid.exe` – no installation required. Settings are stored in `WindowGrid.ini` next to the EXE.
+2. Extract it into a folder of its own with write access (e.g. `C:\Tools\WindowGrid`) and start `WindowGrid.exe` – no installation required. Settings are stored in `%LOCALAPPDATA%\WindowGrid\WindowGrid.ini`.
 3. Optional: enable “Mit Windows starten” (start with Windows) in the settings.
 
 Requirements: Windows 10 or 11 with .NET Framework 4.x (included in Windows).
@@ -80,14 +80,14 @@ Fenster beim Ziehen per Raster anordnen – ein moderner Nachbau der bekannten W
 - **Tray-Symbol** mit Menü im Windows-11-Stil, Hell/Dunkel und Windows-Akzentfarbe
 - **Autostart**, wahlweise **mit Administratorrechten** (über die Aufgabenplanung), um auch Fenster von Programmen mit Adminrechten anzuordnen
 - **Updates:** sieht beim Start (höchstens einmal täglich) auf GitHub nach einer neuen Version und aktualisiert sich auf Klick selbst – die Einstellungen bleiben erhalten
-- **Portabel:** Einstellungen in `WindowGrid.ini` neben der EXE
+- **Ohne Installation:** entpacken und starten – die Einstellungen liegen in `%LOCALAPPDATA%\WindowGrid\WindowGrid.ini`
 
 Die ausführliche Anleitung steht in [Anleitung.txt](Anleitung.txt).
 
 ### Installation
 
 1. Das ZIP `WindowGrid-<Version>.zip` aus den [Releases](https://github.com/WestMc002/WindowGrid/releases) herunterladen.
-2. In einen eigenen Ordner mit Schreibrechten entpacken (z. B. `C:\Tools\WindowGrid`) und `WindowGrid.exe` starten – keine Installation nötig. Die Einstellungen landen in `WindowGrid.ini` neben der EXE.
+2. In einen eigenen Ordner mit Schreibrechten entpacken (z. B. `C:\Tools\WindowGrid`) und `WindowGrid.exe` starten – keine Installation nötig. Die Einstellungen landen in `%LOCALAPPDATA%\WindowGrid\WindowGrid.ini`.
 3. Optional: in den Einstellungen „Mit Windows starten“ einschalten.
 
 Voraussetzungen: Windows 10 oder 11 mit .NET Framework 4.x (in Windows enthalten).

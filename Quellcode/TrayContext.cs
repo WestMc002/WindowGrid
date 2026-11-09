@@ -346,7 +346,11 @@ namespace WindowGrid
                         });
                     }
                 };
-                _form.FormClosed += delegate { _form = null; };
+                _form.FormClosed += delegate
+                {
+                    _form = null;
+                    Theme.Accent = _settings.Accent; // Vorschau-Farbe verwerfen, falls mit "Abbrechen" geschlossen
+                };
                 _form.Show();
             }
             if (_form.WindowState == FormWindowState.Minimized) _form.WindowState = FormWindowState.Normal;

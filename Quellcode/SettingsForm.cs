@@ -32,6 +32,7 @@ namespace WindowGrid
         private ToggleSwitch _sysAccent, _showSize, _showMargins, _animate, _autostart;
         private ColorSwatch _swatch;
         private ModernButton _btnSave, _btnCancel, _btnDefaults;
+        private Label _error; // rote Fehlerzeile links neben den Knöpfen
         private Card[] _cards;
         private PictureBox _logo;
         private UpdateBar _bar;
@@ -259,8 +260,16 @@ namespace WindowGrid
             // --- Schaltflächen
             int by = S(742);
             _btnDefaults = MakeButton("Standardwerte", false, new Rectangle(leftX, by, S(140), S(34)));
+            // "Abbrechen" links, "Speichern" (primär) ganz rechts, 10 Abstand; links davon die Fehlerzeile
             _btnCancel = MakeButton("Abbrechen", false, new Rectangle(S(736) - S(120) - S(10) - S(120), by, S(120), S(34)));
             _btnSave = MakeButton("Speichern", true, new Rectangle(S(736) - S(120), by, S(120), S(34)));
+            _error = MakeLabel("", 12.5f, false, false);
+            _error.AutoSize = false;
+            _error.AutoEllipsis = true;
+            _error.TextAlign = ContentAlignment.MiddleLeft;
+            _error.Tag = "error";
+            _error.Bounds = new Rectangle(leftX + S(140) + S(12), by, _btnCancel.Left - S(12) - (leftX + S(140) + S(12)), S(34));
+            Controls.Add(_error);
             _btnDefaults.Click += delegate { Settings d = new Settings(); d.FirstRun = false; d.Paused = _edit.Paused; d.LastSelection = _edit.LastSelection; d.LastUpdateCheck = _edit.LastUpdateCheck; d.UpdateCheck = _edit.UpdateCheck; _edit.CopyFrom(d); LoadValues(false); };
             _btnCancel.Click += delegate { Close(); };
             _btnSave.Click += delegate { Save(); };
@@ -466,6 +475,14 @@ namespace WindowGrid
 
         private void Save()
         {
+            _error.Text = "";
+            // erst prüfen, dann speichern – bei einem Fehler bleibt das Fenster offen
+            int[] keys = { _resizeOn.Checked ? _resizeKey.Key : -1, _moveOn.Checked ? _moveKey.Key : -2, _centerOn.Checked ? _centerKey.Key : -3 };
+            if (keys[0] == keys[1] || keys[0] == keys[2] || keys[1] == keys[2])
+            {
+                _error.Text = "Zwei Funktionen haben dieselbe Taste.";
+                return;
+            }
             ReadValues();
             // Die letzte Auswahl merkt sich WindowGrid laufend – nicht mit dem Stand beim Öffnen überschreiben
             _edit.LastSelection = _original.LastSelection;
@@ -486,9 +503,10 @@ namespace WindowGrid
                 Cursor = Cursors.Default;
                 if (!ok)
                 {
-                    MessageBox.Show(this,
-                        "Der Autostart konnte nicht eingerichtet werden.\n\nWurde die Windows-Nachfrage (Benutzerkontensteuerung) abgebrochen?",
-                        "WindowGrid", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    // übrige Einstellungen sind gespeichert; das Fenster bleibt offen, damit man es erneut versuchen kann
+                    if (Saved != null) Saved(this, EventArgs.Empty);
+                    _error.Text = "Autostart nicht eingerichtet – Windows-Nachfrage abgebrochen?";
+                    return;
                 }
             }
 
@@ -524,10 +542,20 @@ namespace WindowGrid
             {
                 bool onCard = parent is Card;
                 if (!(c is Card)) c.BackColor = onCard ? p.Card : p.Back;
-                if (c is Label) c.ForeColor = (c.Tag as string) == "sub" ? p.SubText : p.Text;
+                if (c is Label)
+                {
+                    string tag = c.Tag as string;
+                    c.ForeColor = tag == "error" ? ErrorColor(p) : tag == "sub" ? p.SubText : p.Text;
+                }
                 if (c is GridPreview) c.BackColor = p.Card;
                 if (c.Controls.Count > 0) ApplyTheme(c, p);
             }
+        }
+
+        /// <summary>Rot für Fehlermeldungen (Windows 11: hell #C42B1C, dunkel #FF99A4).</summary>
+        private static Color ErrorColor(Palette p)
+        {
+            return p.Dark ? Color.FromArgb(255, 153, 164) : Color.FromArgb(196, 43, 28);
         }
 
         private static void InvalidateAll(Control c)
@@ -577,7 +605,15 @@ namespace WindowGrid
 
         protected override void OnKeyDown(KeyEventArgs e)
         {
-            if (e.KeyCode == Keys.Escape && !_resizeKey.Capturing && !_moveKey.Capturing) { Close(); e.Handled = true; }
+            bool capturing = _resizeKey.Capturing || _moveKey.Capturing || _centerKey.Capturing;
+            // Esc = Abbrechen, Enter = Speichern (außer ein Knopf hat den Fokus – der löst selbst aus)
+            if (e.KeyCode == Keys.Escape && !capturing) { Close(); e.Handled = true; }
+            else if (e.KeyCode == Keys.Enter && e.Modifiers == Keys.None && !capturing && !(ActiveControl is ModernButton))
+            {
+                Save();
+                e.Handled = true;
+                e.SuppressKeyPress = true;
+            }
             base.OnKeyDown(e);
         }
 

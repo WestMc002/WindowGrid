@@ -116,6 +116,8 @@ namespace WindowGrid
 
             int by = S(590);
             ModernButton defaults = MakeButton("Standardwerte", false, new Rectangle(S(24), by, S(140), S(34)));
+            // wie die Einstellungsseite: "Abbrechen" links, Primärknopf ganz rechts. "Übernehmen", weil erst
+            // "Speichern" im Einstellungsfenster die Schnellzonen dauerhaft speichert.
             ModernButton cancel = MakeButton("Abbrechen", false, new Rectangle(S(736) - S(120) - S(10) - S(120), by, S(120), S(34)));
             ModernButton ok = MakeButton("Übernehmen", true, new Rectangle(S(736) - S(120), by, S(120), S(34)));
             defaults.Click += delegate { LoadValues(QuickZone.Defaults()); };
@@ -244,7 +246,14 @@ namespace WindowGrid
 
         protected override void OnKeyDown(KeyEventArgs e)
         {
+            // Esc = Abbrechen, Enter = Übernehmen (außer ein Knopf hat den Fokus – der löst selbst aus)
             if (e.KeyCode == Keys.Escape) { DialogResult = DialogResult.Cancel; Close(); e.Handled = true; }
+            else if (e.KeyCode == Keys.Enter && e.Modifiers == Keys.None && !(ActiveControl is ModernButton))
+            {
+                Save();
+                e.Handled = true;
+                e.SuppressKeyPress = true;
+            }
             base.OnKeyDown(e);
         }
 

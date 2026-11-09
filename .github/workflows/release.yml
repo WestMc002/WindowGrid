@@ -65,7 +65,7 @@ jobs:
           }
           $zeilen.Add('## Installation')
           $zeilen.Add('')
-          $zeilen.Add("- ZIP ``WindowGrid-$ver.zip`` herunterladen und in einen eigenen Ordner mit Schreibrechten entpacken, z. B. ``C:\Tools\WindowGrid`` – WindowGrid speichert seine Einstellungen in ``WindowGrid.ini`` neben der EXE.")
+          $zeilen.Add("- ZIP ``WindowGrid-$ver.zip`` herunterladen und in einen eigenen Ordner mit Schreibrechten entpacken, z. B. ``C:\Tools\WindowGrid`` – WindowGrid speichert seine Einstellungen in ``%LOCALAPPDATA%\WindowGrid\WindowGrid.ini``.")
           $zeilen.Add('- `WindowGrid.exe` starten. Das Symbol erscheint im Infobereich neben der Uhr; Linksklick öffnet die Einstellungen.')
           $zeilen.Add('- Erste Schritte: ein Fenster an der Titelleiste ziehen und dabei die Leertaste drücken – das Raster erscheint.')
           $zeilen.Add('- Update: WindowGrid sieht selbst auf GitHub nach neuen Versionen und aktualisiert sich auf Klick (Tray-Menü, Hinweis im Infobereich oder Info-Fenster). Von Hand: WindowGrid beenden und die vorhandene `WindowGrid.exe` ersetzen.')

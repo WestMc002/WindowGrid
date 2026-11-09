@@ -134,8 +134,9 @@ Einstellungen
   Adminrechten neu gestartet werden. Im Info-Fenster steht unter "Rechte",
   ob WindowGrid gerade als Administrator läuft.
 
-Die Einstellungen liegen portabel in "WindowGrid.ini" neben der EXE
-(falls der Ordner schreibgeschützt ist: %APPDATA%\WindowGrid\WindowGrid.ini).
+Die Einstellungen liegen in "%LOCALAPPDATA%\WindowGrid\WindowGrid.ini" (wie bei den
+anderen Programmen). Eine WindowGrid.ini früherer Versionen neben der EXE wird beim
+ersten Start automatisch dorthin übernommen.
 
 Erstellen
 ---------
@@ -170,7 +171,6 @@ Resources                Programm-Icon und GS-Logo (werden in die EXE eingebette
 Screenshots              Bilder für die README auf GitHub (WindowGrid.exe --screenshots)
 Design\Icon-Vorschläge   alternative Logos (ICO + PNG) mit Übersicht
 Backup                   Sicherungen je Version
-WindowGrid.ini           Einstellungen (portabel neben der EXE)
 Erstellen.log            Compiler-Meldungen des letzten Builds
 
 Hinweise

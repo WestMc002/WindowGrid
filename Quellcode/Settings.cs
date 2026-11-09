@@ -26,7 +26,10 @@ namespace WindowGrid
         }
     }
 
-    /// <summary>Einstellungen, gespeichert als WindowGrid.ini neben der EXE (portabel).</summary>
+    /// <summary>
+    /// Einstellungen, gespeichert als %LOCALAPPDATA%\WindowGrid\WindowGrid.ini (wie die anderen Programme).
+    /// Eine WindowGrid.ini früherer Versionen (neben der EXE oder unter %APPDATA%) wird beim ersten Start übernommen.
+    /// </summary>
     internal sealed class Settings
     {
         public int Columns = 12;
@@ -84,23 +87,56 @@ namespace WindowGrid
             UpdateCheck = o.UpdateCheck; LastUpdateCheck = o.LastUpdateCheck;
         }
 
-        private static string LocalPath
+        /// <summary>Ordner der Laufzeitdaten: %LOCALAPPDATA%\WindowGrid.</summary>
+        public static string DataDirectory
         {
-            get { return Path.Combine(AppInfo.ExeDirectory, "WindowGrid.ini"); }
+            get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), AppInfo.Name); }
         }
 
-        private static string RoamingPath
+        /// <summary>Einstellungsdatei: %LOCALAPPDATA%\WindowGrid\WindowGrid.ini.</summary>
+        public static string DataPath
+        {
+            get { return Path.Combine(DataDirectory, "WindowGrid.ini"); }
+        }
+
+        /// <summary>Frühere Orte: neben der EXE (portabel, bis 1.41) und %APPDATA%\WindowGrid (Ersatz bei schreibgeschütztem Ordner).</summary>
+        private static string[] OldPaths
         {
             get
             {
-                return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "WindowGrid", "WindowGrid.ini");
+                return new[]
+                {
+                    Path.Combine(AppInfo.ExeDirectory, "WindowGrid.ini"),
+                    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "WindowGrid", "WindowGrid.ini")
+                };
             }
+        }
+
+        /// <summary>
+        /// Übernimmt eine WindowGrid.ini vom früheren Ort nach %LOCALAPPDATA%\WindowGrid und löscht die alte Datei,
+        /// damit es nur noch eine gibt. Klappt das Kopieren nicht, wird die alte Datei weiter gelesen.
+        /// </summary>
+        private static string MigrateOldFile()
+        {
+            foreach (string old in OldPaths)
+            {
+                if (!File.Exists(old)) continue;
+                try
+                {
+                    Directory.CreateDirectory(DataDirectory);
+                    File.Copy(old, DataPath, false);
+                    try { File.Delete(old); } catch { } // z. B. Ordner ohne Schreibrechte: alte Datei bleibt, wird aber nicht mehr gelesen
+                    return DataPath;
+                }
+                catch { return old; }
+            }
+            return null;
         }
 
         public static Settings Load()
         {
             Settings s = new Settings();
-            string path = File.Exists(LocalPath) ? LocalPath : (File.Exists(RoamingPath) ? RoamingPath : null);
+            string path = File.Exists(DataPath) ? DataPath : MigrateOldFile();
             if (path == null)
             {
                 s.ImportOldWindowGrid();
@@ -227,7 +263,7 @@ namespace WindowGrid
             sb.AppendLine("LetzteAuswahl=" + RectToIni(LastSelection));
             sb.AppendLine("ErsterStart=" + B(FirstRun));
 
-            string[] targets = _filePath != null ? new[] { _filePath, LocalPath, RoamingPath } : new[] { LocalPath, RoamingPath };
+            string[] targets = _filePath != null && _filePath != DataPath ? new[] { DataPath, _filePath } : new[] { DataPath };
             foreach (string t in targets)
             {
                 try
