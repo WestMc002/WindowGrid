@@ -32,7 +32,8 @@ namespace WindowGrid
         private ToggleSwitch _sysAccent, _showSize, _showMargins, _animate, _autostart;
         private ColorSwatch _swatch;
         private ModernButton _btnSave, _btnCancel, _btnDefaults;
-        private Label _error; // rote Fehlerzeile links neben den Knöpfen
+        private Label _error; // Zeile links neben den Knöpfen: rote Fehler bzw. kurz grün "Gespeichert"
+        private Timer _statusTimer;
         private Card[] _cards;
         private PictureBox _logo;
         private UpdateBar _bar;
@@ -475,12 +476,12 @@ namespace WindowGrid
 
         private void Save()
         {
-            _error.Text = "";
+            SetStatus("", false);
             // erst prüfen, dann speichern – bei einem Fehler bleibt das Fenster offen
             int[] keys = { _resizeOn.Checked ? _resizeKey.Key : -1, _moveOn.Checked ? _moveKey.Key : -2, _centerOn.Checked ? _centerKey.Key : -3 };
             if (keys[0] == keys[1] || keys[0] == keys[2] || keys[1] == keys[2])
             {
-                _error.Text = "Zwei Funktionen haben dieselbe Taste.";
+                SetStatus("Zwei Funktionen haben dieselbe Taste.", false);
                 return;
             }
             ReadValues();
@@ -505,7 +506,7 @@ namespace WindowGrid
                 {
                     // übrige Einstellungen sind gespeichert; das Fenster bleibt offen, damit man es erneut versuchen kann
                     if (Saved != null) Saved(this, EventArgs.Empty);
-                    _error.Text = "Autostart nicht eingerichtet – Windows-Nachfrage abgebrochen?";
+                    SetStatus("Autostart nicht eingerichtet – Windows-Nachfrage abgebrochen?", false);
                     return;
                 }
             }
@@ -520,7 +521,34 @@ namespace WindowGrid
             }
 
             if (Saved != null) Saved(this, EventArgs.Empty);
-            Close();
+            // globale Vorgabe: Speichern schließt das Fenster nicht, sondern meldet kurz grün "Gespeichert"
+            SetStatus("Gespeichert", true);
+        }
+
+        /// <summary>Text der Statuszeile links neben den Knöpfen: Fehler rot (bleibt), Erfolg grün (verschwindet nach 4 s).</summary>
+        private void SetStatus(string text, bool ok)
+        {
+            if (_statusTimer != null) _statusTimer.Stop();
+            _error.Tag = ok ? "ok" : "error";
+            Palette p = Theme.Current;
+            _error.ForeColor = ok ? OkColor(p) : ErrorColor(p);
+            _error.Text = text;
+            if (ok && text.Length > 0)
+            {
+                if (_statusTimer == null)
+                {
+                    _statusTimer = new Timer();
+                    _statusTimer.Interval = 4000;
+                    _statusTimer.Tick += delegate { _statusTimer.Stop(); if ((_error.Tag as string) == "ok") _error.Text = ""; };
+                }
+                _statusTimer.Start();
+            }
+        }
+
+        /// <summary>Grün für Erfolgsmeldungen (Windows 11: hell #0F7B0F, dunkel #6CCB5F).</summary>
+        private static Color OkColor(Palette p)
+        {
+            return p.Dark ? Color.FromArgb(108, 203, 95) : Color.FromArgb(15, 123, 15);
         }
 
         // ------------------------------------------------------------------ Design
@@ -545,7 +573,7 @@ namespace WindowGrid
                 if (c is Label)
                 {
                     string tag = c.Tag as string;
-                    c.ForeColor = tag == "error" ? ErrorColor(p) : tag == "sub" ? p.SubText : p.Text;
+                    c.ForeColor = tag == "error" ? ErrorColor(p) : tag == "ok" ? OkColor(p) : tag == "sub" ? p.SubText : p.Text;
                 }
                 if (c is GridPreview) c.BackColor = p.Card;
                 if (c.Controls.Count > 0) ApplyTheme(c, p);
@@ -623,6 +651,7 @@ namespace WindowGrid
             {
                 SystemEvents.UserPreferenceChanged -= OnUserPreferenceChanged;
                 Updater.AvailableChanged -= _onUpdateChanged;
+                if (_statusTimer != null) _statusTimer.Dispose();
                 if (_logo != null && _logo.Image != null) _logo.Image.Dispose();
             }
             base.Dispose(disposing);
