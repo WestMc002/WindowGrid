@@ -98,7 +98,7 @@ namespace WindowGrid
             y += S(38);
 
             Label version = new Label();
-            version.Text = "Version " + AppInfo.Version;
+            version.Text = "Version " + AppInfo.ShownVersion;
             version.Font = new Font("Segoe UI", 10.5f);
             version.ForeColor = _versionText;
             version.BackColor = _back;

@@ -31,13 +31,17 @@ The program interface is in German.
 - **Center** with one key (default C)
 - **Finer or coarser grid** with the mouse wheel (from 1/16 to 4 ×)
 - **Quick zones 1–9:** jump to a stored area with a digit key, Shift+digit saves the current selection; editor with preview
+- **Quick zones without the mouse:** Ctrl+Win+Alt+1–9 moves the active window to a quick zone
+- **Grid per monitor:** individual columns and rows for each monitor
+- **Exceptions:** programs in which WindowGrid stays out of the way
 - **Fine-tuning with the arrow keys**
 - **Repeat the last selection:** press Space twice quickly
 - **All keys freely assignable**
 - Works on **multiple monitors** and with **per-monitor DPI scaling**
 - **Tray icon** with a Windows 11 style menu, light/dark mode and Windows accent color
 - **Autostart**, optionally **with administrator rights** (via Task Scheduler) to arrange windows of elevated programs
-- **Updates:** checks GitHub for a new version at startup (at most once a day) and updates itself with one click – settings are kept
+- **Updates:** checks GitHub for a new version at startup (at most once a day) and updates itself with one click (download verified by SHA-256) – settings are kept
+- **Export/import** of the settings, e.g. for a second PC
 - **No installation:** extract and start – settings are stored in `%LOCALAPPDATA%\WindowGrid\WindowGrid.ini`
 
 ### Installation
@@ -73,13 +77,17 @@ Fenster beim Ziehen per Raster anordnen – ein moderner Nachbau der bekannten W
 - **Zentrieren** mit einer Taste (Standard C)
 - **Raster feiner oder gröber** mit dem Mausrad (1/16 bis 4-fach)
 - **Schnellzonen 1–9:** mit einer Ziffer auf einen gespeicherten Bereich springen, Umschalt+Ziffer speichert die aktuelle Auswahl; Editor mit Vorschau
+- **Schnellzonen ohne Maus:** Strg+Win+Alt+1–9 setzt das aktive Fenster auf eine Schnellzone
+- **Raster je Monitor:** eigene Spalten und Zeilen für jeden Monitor
+- **Ausnahmen:** Programme, bei denen WindowGrid nichts tut
 - **Feinjustieren mit den Pfeiltasten**
 - **Letzte Auswahl wiederholen:** Leertaste zweimal schnell drücken
 - **Alle Tasten frei belegbar**
 - Funktioniert mit **mehreren Monitoren** und **unterschiedlicher Skalierung je Monitor**
 - **Tray-Symbol** mit Menü im Windows-11-Stil, Hell/Dunkel und Windows-Akzentfarbe
 - **Autostart**, wahlweise **mit Administratorrechten** (über die Aufgabenplanung), um auch Fenster von Programmen mit Adminrechten anzuordnen
-- **Updates:** sieht beim Start (höchstens einmal täglich) auf GitHub nach einer neuen Version und aktualisiert sich auf Klick selbst – die Einstellungen bleiben erhalten
+- **Updates:** sieht beim Start (höchstens einmal täglich) auf GitHub nach einer neuen Version und aktualisiert sich auf Klick selbst (Download per SHA-256 geprüft) – die Einstellungen bleiben erhalten
+- **Export/Import** der Einstellungen, z. B. für einen zweiten Rechner
 - **Ohne Installation:** entpacken und starten – die Einstellungen liegen in `%LOCALAPPDATA%\WindowGrid\WindowGrid.ini`
 
 Die ausführliche Anleitung steht in [Anleitung.txt](Anleitung.txt).

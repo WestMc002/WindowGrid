@@ -24,6 +24,20 @@ namespace WindowGrid
         {
             get { return Path.GetDirectoryName(Application.ExecutablePath); }
         }
+
+        /// <summary>
+        /// Version für die Anzeige. In den Screenshots (--screenshots) nur Haupt.Neben, damit sich die Bilder
+        /// nicht mit jedem Build ändern.
+        /// </summary>
+        public static string ShownVersion
+        {
+            get
+            {
+                if (!Demo.Active) return Version;
+                string[] p = Version.Split('.');
+                return p.Length >= 2 ? p[0] + "." + p[1] : Version;
+            }
+        }
     }
 
     /// <summary>
@@ -53,8 +67,12 @@ namespace WindowGrid
         public RectangleF LastSelection = RectangleF.Empty; // in % des Arbeitsbereichs
         public bool Paused = false;
         public bool FirstRun = true;
+        public bool NavPinned = true;   // Navigation im Einstellungsfenster angepinnt (ausgeklappt)
         public bool UpdateCheck = true;           // beim Start auf GitHub nach neuen Versionen sehen (höchstens einmal täglich)
         public string LastUpdateCheck = "";       // Zeitpunkt der letzten erfolgreichen Prüfung (UTC, ISO 8601)
+        public bool ZoneHotkeys = true;           // Strg+Win+Alt+1–9 setzt das aktive Fenster auf die Schnellzone
+        public string Excluded = "";              // Programme ohne Raster: Prozessnamen ohne .exe, mit Semikolon getrennt
+        public List<MonitorGrid> Monitors = new List<MonitorGrid>(); // eigenes Raster je Monitor (sonst Spalten/Zeilen)
 
         private static string _filePath;
 
@@ -85,6 +103,56 @@ namespace WindowGrid
             LastSelection = o.LastSelection;
             Paused = o.Paused; FirstRun = o.FirstRun;
             UpdateCheck = o.UpdateCheck; LastUpdateCheck = o.LastUpdateCheck;
+            ZoneHotkeys = o.ZoneHotkeys;
+            NavPinned = o.NavPinned;
+            Excluded = o.Excluded ?? "";
+            Monitors = new List<MonitorGrid>();
+            foreach (MonitorGrid m in o.Monitors) Monitors.Add(m.Clone());
+        }
+
+        // ------------------------------------------------------------------ Ausnahmen und Raster je Monitor
+
+        /// <summary>Liste der Ausnahmen bereinigen: ohne Pfad und ".exe", ohne Doppelte, mit "; " getrennt.</summary>
+        public static string NormalizeExcluded(string text)
+        {
+            List<string> names = new List<string>();
+            foreach (string raw in (text ?? "").Split(';', ',', '\n', '\r'))
+            {
+                string n = raw.Trim().Trim('"');
+                int slash = Math.Max(n.LastIndexOf('\\'), n.LastIndexOf('/'));
+                if (slash >= 0) n = n.Substring(slash + 1);
+                if (n.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) n = n.Substring(0, n.Length - 4);
+                n = n.Trim();
+                if (n.Length == 0) continue;
+                if (!names.Exists(x => string.Equals(x, n, StringComparison.OrdinalIgnoreCase))) names.Add(n);
+            }
+            return string.Join("; ", names.ToArray());
+        }
+
+        /// <summary>true, wenn das Programm (Prozessname ohne .exe) vom Raster ausgenommen ist.</summary>
+        public bool IsExcluded(string processName)
+        {
+            if (string.IsNullOrEmpty(processName) || string.IsNullOrEmpty(Excluded)) return false;
+            foreach (string raw in Excluded.Split(';'))
+                if (string.Equals(raw.Trim(), processName, StringComparison.OrdinalIgnoreCase)) return true;
+            return false;
+        }
+
+        /// <summary>Gerätename eines Bildschirms (z. B. \\.\DISPLAY1), ohne angehängte Nullzeichen.</summary>
+        public static string DeviceName(Screen screen)
+        {
+            string n = screen != null ? screen.DeviceName ?? "" : "";
+            int zero = n.IndexOf('\0');
+            if (zero >= 0) n = n.Substring(0, zero);
+            return n.Trim();
+        }
+
+        /// <summary>Eigenes Raster dieses Monitors (null = es gelten Spalten/Zeilen).</summary>
+        public MonitorGrid GridFor(string device)
+        {
+            foreach (MonitorGrid m in Monitors)
+                if (string.Equals(m.Device, device, StringComparison.OrdinalIgnoreCase)) return m;
+            return null;
         }
 
         /// <summary>Ordner der Laufzeitdaten: %LOCALAPPDATA%\WindowGrid.</summary>
@@ -135,15 +203,43 @@ namespace WindowGrid
 
         public static Settings Load()
         {
-            Settings s = new Settings();
             string path = File.Exists(DataPath) ? DataPath : MigrateOldFile();
             if (path == null)
             {
-                s.ImportOldWindowGrid();
-                return s;
+                Settings fresh = new Settings();
+                fresh.ImportOldWindowGrid();
+                return fresh;
             }
             _filePath = path;
+            Settings s = new Settings();
+            try { s.ReadFile(path); }
+            catch (Exception ex) { Log.Write("Einstellungen laden", ex); }
+            return s;
+        }
+
+        /// <summary>Einstellungen aus einer anderen Datei lesen (Import). null, wenn die Datei keine WindowGrid.ini ist.</summary>
+        public static Settings LoadFrom(string path)
+        {
             try
+            {
+                string text = File.ReadAllText(path, Encoding.UTF8);
+                if (text.IndexOf("[Raster]", StringComparison.OrdinalIgnoreCase) < 0 ||
+                    text.IndexOf("Spalten", StringComparison.OrdinalIgnoreCase) < 0) return null;
+                Settings s = new Settings();
+                s.ReadFile(path);
+                s.FirstRun = false;
+                return s;
+            }
+            catch (Exception ex)
+            {
+                Log.Write("Einstellungen importieren", ex);
+                return null;
+            }
+        }
+
+        private void ReadFile(string path)
+        {
+            Settings s = this;
             {
                 Dictionary<string, string> values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
                 foreach (string raw in File.ReadAllLines(path, Encoding.UTF8))
@@ -185,12 +281,22 @@ namespace WindowGrid
                 if (values.TryGetValue("LetzteAuswahl", out last)) s.LastSelection = ParseRect(last);
                 s.Paused = GetBool(values, "Pausiert", s.Paused);
                 s.FirstRun = GetBool(values, "ErsterStart", s.FirstRun);
+                s.NavPinned = GetBool(values, "NavigationAngepinnt", s.NavPinned);
                 s.UpdateCheck = GetBool(values, "UpdatesPruefen", s.UpdateCheck);
                 string lastCheck;
                 if (values.TryGetValue("LetzteUpdatePruefung", out lastCheck)) s.LastUpdateCheck = lastCheck.Trim();
+                s.ZoneHotkeys = GetBool(values, "SchnellzonenTasten", s.ZoneHotkeys);
+                string excluded;
+                if (values.TryGetValue("Ausnahmen", out excluded)) s.Excluded = NormalizeExcluded(excluded);
+                s.Monitors.Clear();
+                for (int i = 1; i <= 16; i++)
+                {
+                    string mon;
+                    if (!values.TryGetValue("Monitor" + i, out mon)) continue;
+                    MonitorGrid mg = MonitorGrid.Parse(mon);
+                    if (mg != null && s.GridFor(mg.Device) == null) s.Monitors.Add(mg);
+                }
             }
-            catch { }
-            return s;
         }
 
         /// <summary>Übernimmt beim ersten Start die Rasterwerte aus der alten WindowGrid.settings, falls vorhanden.</summary>
@@ -228,6 +334,32 @@ namespace WindowGrid
 
         public void Save()
         {
+            string text = ToIni();
+            string[] targets = _filePath != null && _filePath != DataPath ? new[] { DataPath, _filePath } : new[] { DataPath };
+            Exception last = null;
+            foreach (string t in targets)
+            {
+                try
+                {
+                    Directory.CreateDirectory(Path.GetDirectoryName(t));
+                    File.WriteAllText(t, text, new UTF8Encoding(false));
+                    _filePath = t;
+                    return;
+                }
+                catch (Exception ex) { last = ex; }
+            }
+            Log.Write("Einstellungen speichern", last);
+        }
+
+        /// <summary>Einstellungen in eine andere Datei schreiben (Export).</summary>
+        public void SaveTo(string path)
+        {
+            File.WriteAllText(path, ToIni(), new UTF8Encoding(false));
+        }
+
+        /// <summary>Inhalt der WindowGrid.ini.</summary>
+        public string ToIni()
+        {
             StringBuilder sb = new StringBuilder();
             sb.AppendLine("; WindowGrid " + AppInfo.Version + " - Einstellungen");
             sb.AppendLine("[Raster]");
@@ -262,19 +394,19 @@ namespace WindowGrid
             for (int i = 0; i < Zones.Length; i++) sb.AppendLine("Zone" + (i + 1) + "=" + Zones[i].ToIni());
             sb.AppendLine("LetzteAuswahl=" + RectToIni(LastSelection));
             sb.AppendLine("ErsterStart=" + B(FirstRun));
-
-            string[] targets = _filePath != null && _filePath != DataPath ? new[] { DataPath, _filePath } : new[] { DataPath };
-            foreach (string t in targets)
-            {
-                try
-                {
-                    Directory.CreateDirectory(Path.GetDirectoryName(t));
-                    File.WriteAllText(t, sb.ToString(), new UTF8Encoding(false));
-                    _filePath = t;
-                    return;
-                }
-                catch { }
-            }
+            sb.AppendLine("NavigationAngepinnt=" + B(NavPinned));
+            sb.AppendLine("; Strg+Win+Alt+1 bis 9 setzt das aktive Fenster ohne Maus auf die Schnellzone (1 = ja)");
+            sb.AppendLine("SchnellzonenTasten=" + B(ZoneHotkeys));
+            sb.AppendLine("[Ausnahmen]");
+            sb.AppendLine("; Programme, bei denen WindowGrid nichts tut: Prozessnamen ohne .exe, mit Semikolon getrennt");
+            sb.AppendLine("Ausnahmen=" + (Excluded ?? ""));
+            sb.AppendLine("[Monitore]");
+            sb.AppendLine("; Eigenes Raster je Monitor: Gerätename|Spalten|Zeilen (ohne Eintrag gelten Spalten/Zeilen von oben)");
+            // nach Gerätename sortiert, damit die Reihenfolge der Einträge keine Rolle spielt
+            List<MonitorGrid> sorted = new List<MonitorGrid>(Monitors);
+            sorted.Sort(delegate (MonitorGrid a, MonitorGrid b) { return string.Compare(a.Device, b.Device, StringComparison.OrdinalIgnoreCase); });
+            for (int i = 0; i < sorted.Count; i++) sb.AppendLine("Monitor" + (i + 1) + "=" + sorted[i].ToIni());
+            return sb.ToString();
         }
 
         private static string B(bool b) { return b ? "1" : "0"; }
@@ -324,6 +456,32 @@ namespace WindowGrid
             if (s.Length == 6 && int.TryParse(s, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out rgb))
                 return Color.FromArgb(255, (rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF);
             return def;
+        }
+    }
+
+    /// <summary>Eigenes Raster eines Monitors (Gerätename wie \\.\DISPLAY2).</summary>
+    internal sealed class MonitorGrid
+    {
+        public string Device;
+        public int Columns, Rows;
+
+        public MonitorGrid(string device, int columns, int rows)
+        {
+            Device = device;
+            Columns = Math.Max(1, Math.Min(100, columns));
+            Rows = Math.Max(1, Math.Min(100, rows));
+        }
+
+        public MonitorGrid Clone() { return new MonitorGrid(Device, Columns, Rows); }
+
+        public string ToIni() { return Device + "|" + Columns + "|" + Rows; }
+
+        public static MonitorGrid Parse(string s)
+        {
+            string[] p = (s ?? "").Split('|');
+            int c, r;
+            if (p.Length != 3 || p[0].Trim().Length == 0 || !int.TryParse(p[1], out c) || !int.TryParse(p[2], out r)) return null;
+            return new MonitorGrid(p[0].Trim(), c, r);
         }
     }
 

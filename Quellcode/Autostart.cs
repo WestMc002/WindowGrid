@@ -121,10 +121,12 @@ namespace WindowGrid
             {
                 ok = CreateTask();
                 if (ok) SetRunKey(false);
+                else Log.Write("Autostart", "Aufgabe in der Aufgabenplanung konnte nicht angelegt werden (Windows-Nachfrage abgebrochen?).");
             }
             else
             {
                 if (taskExists) ok = RunElevated("/Delete /TN \"" + TaskName + "\" /F");
+                if (!ok) Log.Write("Autostart", "Aufgabe in der Aufgabenplanung konnte nicht entfernt werden.");
                 SetRunKey(enabled);
             }
             return ok;

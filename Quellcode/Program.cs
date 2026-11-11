@@ -52,10 +52,15 @@ namespace WindowGrid
                 Application.SetCompatibleTextRenderingDefault(false);
                 // Falls WindowGrid unerwartet endet: Windows-Andocken wieder einschalten
                 AppDomain.CurrentDomain.ProcessExit += delegate { GridEngine.RestoreSnap(); };
-                AppDomain.CurrentDomain.UnhandledException += delegate { GridEngine.RestoreSnap(); };
+                AppDomain.CurrentDomain.UnhandledException += delegate (object s, UnhandledExceptionEventArgs e)
+                {
+                    GridEngine.RestoreSnap();
+                    Log.Write("Unerwarteter Fehler", e.ExceptionObject as Exception);
+                };
                 Application.ThreadException += delegate (object s, ThreadExceptionEventArgs e)
                 {
                     GridEngine.RestoreSnap();
+                    Log.Write("Unerwarteter Fehler", e.Exception);
                     MessageBox.Show("Unerwarteter Fehler:\n\n" + e.Exception.Message, "WindowGrid",
                         MessageBoxButtons.OK, MessageBoxIcon.Error);
                 };

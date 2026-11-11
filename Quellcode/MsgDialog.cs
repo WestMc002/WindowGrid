@@ -264,23 +264,30 @@ namespace WindowGrid
 
     /// <summary>
     /// Tooltip im Programmdesign (globale Vorgabe „Weitere Fenster“, Referenz Wake on LAN): Kartenfarbe, 1 px Rand,
-    /// Text in Textfarbe, Segoe UI 9 pt, Innenabstand 10 × 6, Umbruch bei 400 (je × Skalierung).
+    /// Text in Textfarbe, Segoe UI 9 pt, Innenabstand 8 × 5 an allen Seiten gleich, Umbruch bei 400 (je × Skalierung),
+    /// 15 s sichtbar. Gemessen und gezeichnet wird mit NoPadding; beim Messen mit Graphics, sonst rechnet Windows
+    /// trotzdem einen Zuschlag ein und der Rand rechts wird größer als links.
     /// </summary>
     internal sealed class ModernToolTip : ToolTip
     {
         private static readonly Font TipFont = new Font("Segoe UI", 9f);
-        private const TextFormatFlags Flags = TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix | TextFormatFlags.Left | TextFormatFlags.Top;
+        private const TextFormatFlags Flags = TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding |
+                                              TextFormatFlags.Left | TextFormatFlags.Top;
 
         public ModernToolTip()
         {
             OwnerDraw = true;
+            AutoPopDelay = 15000; // 15 s sichtbar statt 5 s
             Popup += delegate (object s, PopupEventArgs e)
             {
-                float k;
-                using (Graphics g = Graphics.FromHwnd(IntPtr.Zero)) k = g.DpiX / 96f;
                 string text = GetToolTip(e.AssociatedControl) ?? "";
-                Size size = TextRenderer.MeasureText(text, TipFont, new Size((int)(400 * k), 0), Flags);
-                e.ToolTipSize = new Size(size.Width + (int)(20 * k), size.Height + (int)(12 * k));
+                using (Graphics g = Graphics.FromHwnd(IntPtr.Zero))
+                {
+                    float k = g.DpiX / 96f;
+                    Size size = TextRenderer.MeasureText(g, text, TipFont, new Size((int)(400 * k), 0), Flags);
+                    // 8 waagrecht, 5 senkrecht je Seite; 1 px Breite als Reserve
+                    e.ToolTipSize = new Size(size.Width + 2 * (int)(8 * k) + 1, size.Height + 2 * (int)(5 * k));
+                }
             };
             Draw += delegate (object s, DrawToolTipEventArgs e)
             {
@@ -288,7 +295,7 @@ namespace WindowGrid
                 Palette p = Theme.Current;
                 using (SolidBrush back = new SolidBrush(p.Card)) e.Graphics.FillRectangle(back, e.Bounds);
                 using (Pen pen = new Pen(p.CardBorder)) e.Graphics.DrawRectangle(pen, 0, 0, e.Bounds.Width - 1, e.Bounds.Height - 1);
-                Rectangle r = new Rectangle((int)(10 * k), (int)(6 * k), e.Bounds.Width - (int)(20 * k), e.Bounds.Height - (int)(12 * k));
+                Rectangle r = new Rectangle((int)(8 * k), (int)(5 * k), e.Bounds.Width - 2 * (int)(8 * k), e.Bounds.Height - 2 * (int)(5 * k));
                 TextRenderer.DrawText(e.Graphics, e.ToolTipText, TipFont, r, p.Text, Flags);
             };
         }

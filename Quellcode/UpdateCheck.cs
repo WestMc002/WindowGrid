@@ -19,6 +19,7 @@ namespace WindowGrid
     internal sealed class ReleaseInfo
     {
         public string Version, PageUrl, ZipUrl;
+        public string Sha256; // Prüfsumme des ZIP laut GitHub (hex), null = nicht angegeben
     }
 
     /// <summary>
@@ -88,6 +89,9 @@ namespace WindowGrid
             if (m.Success) info.PageUrl = m.Groups[1].Value;
             m = Regex.Match(json, "\"browser_download_url\"\\s*:\\s*\"(https://[^\"]+\\.zip)\"", RegexOptions.IgnoreCase);
             if (m.Success) info.ZipUrl = m.Groups[1].Value;
+            // Prüfsumme, die GitHub zum ZIP angibt ("digest": "sha256:…" steht im selben Eintrag vor der Download-Adresse)
+            m = Regex.Match(json, "\"digest\"\\s*:\\s*\"sha256:([0-9a-fA-F]{64})\"[^{}]*?\"browser_download_url\"\\s*:\\s*\"https://[^\"]+\\.zip\"", RegexOptions.IgnoreCase);
+            if (m.Success) info.Sha256 = m.Groups[1].Value.ToLowerInvariant();
             if (string.IsNullOrEmpty(info.Version)) throw new Exception("Antwort von GitHub ohne Versionsnummer.");
             return info;
         }
@@ -149,7 +153,7 @@ namespace WindowGrid
                 ReleaseInfo release = null;
                 string error = null;
                 try { release = GetLatest(); }
-                catch (Exception ex) { error = ex.Message; }
+                catch (Exception ex) { error = ex.Message; Log.Write(manual ? "Update-Prüfung" : "Update-Prüfung (automatisch)", ex.Message); }
                 try
                 {
                     invoker.BeginInvoke((MethodInvoker)delegate
@@ -224,6 +228,18 @@ namespace WindowGrid
                 client.DownloadFile(new Uri(release.ZipUrl), zip);
             }
             if (new FileInfo(zip).Length < 1024) throw new Exception("Die heruntergeladene Datei ist unvollständig.");
+            // Prüfsumme vergleichen, bevor irgendetwas ersetzt wird
+            if (!string.IsNullOrEmpty(release.Sha256))
+            {
+                string actual = Sha256Of(zip);
+                if (!string.Equals(actual, release.Sha256, StringComparison.OrdinalIgnoreCase))
+                {
+                    try { File.Delete(zip); } catch { }
+                    Log.Write("Update", "Prüfsumme falsch: erwartet " + release.Sha256 + ", erhalten " + actual);
+                    throw new Exception("Die heruntergeladene Datei ist beschädigt (Prüfsumme stimmt nicht). Bitte später erneut versuchen.");
+                }
+            }
+            else Log.Write("Update", "GitHub hat keine Prüfsumme zum ZIP geliefert – Download wird ohne Vergleich übernommen.");
             string script = Path.Combine(Folder, "Update.ps1");
             File.WriteAllText(script, Script, new UTF8Encoding(true));
             try { File.Delete(LogFile); } catch { }
@@ -241,6 +257,17 @@ namespace WindowGrid
             {
                 if (ex.NativeErrorCode == 1223) throw new Exception("Update abgebrochen (Administratorrechte nicht erteilt).");
                 throw;
+            }
+        }
+
+        private static string Sha256Of(string file)
+        {
+            using (System.Security.Cryptography.SHA256 sha = System.Security.Cryptography.SHA256.Create())
+            using (FileStream stream = File.OpenRead(file))
+            {
+                StringBuilder sb = new StringBuilder(64);
+                foreach (byte b in sha.ComputeHash(stream)) sb.Append(b.ToString("x2"));
+                return sb.ToString();
             }
         }
 
@@ -271,7 +298,7 @@ namespace WindowGrid
             {
                 string error = null;
                 try { Install(release); }
-                catch (Exception ex) { error = ex.Message; }
+                catch (Exception ex) { error = ex.Message; Log.Write("Update installieren", ex); }
                 try
                 {
                     invoker.BeginInvoke((MethodInvoker)delegate

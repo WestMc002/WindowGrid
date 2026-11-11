@@ -83,9 +83,17 @@ namespace WindowGrid
         // Windows-Andocken (Aero Snap / Andocklayouts) während des Rasters abgeschaltet?
         private static bool _snapDisabled;
 
+        // Grundraster des Monitors, auf dem das Raster gerade liegt (eigenes Raster je Monitor oder Spalten/Zeilen)
+        private int _baseCols, _baseRows;
+
+        // Globale Tastenkürzel Strg+Win+Alt+1–9 (Schnellzonen ohne Maus)
+        private HotkeyWindow _hotkeys;
+
         public GridEngine(Settings settings)
         {
             _settings = settings;
+            _baseCols = settings.Columns;
+            _baseRows = settings.Rows;
             _overlay = new OverlayWindow();
             IntPtr force = _overlay.Handle; // Fensterhandle jetzt erzeugen (für BeginInvoke)
             GC.KeepAlive(force);
@@ -100,6 +108,137 @@ namespace WindowGrid
                 NativeMethods.EVENT_SYSTEM_MOVESIZESTART, NativeMethods.EVENT_SYSTEM_MOVESIZEEND,
                 IntPtr.Zero, _winEventProc, 0, 0,
                 NativeMethods.WINEVENT_OUTOFCONTEXT | NativeMethods.WINEVENT_SKIPOWNPROCESS);
+            UpdateHotkeys();
+        }
+
+        // ------------------------------------------------------------------ Ausnahmen
+
+        /// <summary>Gehört das Fenster zu einem Programm aus der Ausnahmeliste?</summary>
+        private bool IsExcluded(IntPtr hwnd)
+        {
+            if (string.IsNullOrEmpty(_settings.Excluded)) return false;
+            try
+            {
+                uint pid;
+                NativeMethods.GetWindowThreadProcessId(hwnd, out pid);
+                if (pid == 0) return false;
+                using (System.Diagnostics.Process p = System.Diagnostics.Process.GetProcessById((int)pid))
+                    return _settings.IsExcluded(p.ProcessName);
+            }
+            catch { return false; }
+        }
+
+        // ------------------------------------------------------------------ Schnellzonen ohne Maus
+
+        /// <summary>Tastenkürzel Strg+Win+Alt+1–9 an- bzw. abmelden (nach dem Start und nach dem Speichern).</summary>
+        public void UpdateHotkeys()
+        {
+            if (Demo.Active) return;
+            try
+            {
+                if (_settings.ZoneHotkeys)
+                {
+                    if (_hotkeys == null) _hotkeys = new HotkeyWindow(this);
+                    _hotkeys.Register();
+                }
+                else if (_hotkeys != null) _hotkeys.Unregister();
+            }
+            catch (Exception ex) { Log.Write("Tastenkürzel", ex); }
+        }
+
+        /// <summary>Aktives Fenster auf die Schnellzone n setzen (auf dem Monitor, auf dem es liegt).</summary>
+        private void ApplyZoneToActiveWindow(int n)
+        {
+            if (_settings.Paused || _dragging) return;
+            if (n < 1 || n > _settings.Zones.Length) return;
+            QuickZone z = _settings.Zones[n - 1];
+            if (!z.IsValid) return;
+
+            IntPtr hwnd = NativeMethods.GetForegroundWindow();
+            if (hwnd == IntPtr.Zero) return;
+            IntPtr root = NativeMethods.GetAncestor(hwnd, NativeMethods.GA_ROOT);
+            if (root != IntPtr.Zero) hwnd = root;
+            if (!NativeMethods.IsWindowVisible(hwnd) || NativeMethods.IsIconic(hwnd)) return;
+
+            // Desktop, Taskleiste und eigene Fenster nicht anfassen
+            System.Text.StringBuilder cls = new System.Text.StringBuilder(128);
+            NativeMethods.GetClassName(hwnd, cls, cls.Capacity);
+            string c = cls.ToString();
+            if (c == "Progman" || c == "WorkerW" || c == "Shell_TrayWnd" || c == "Shell_SecondaryTrayWnd") return;
+            uint pid;
+            NativeMethods.GetWindowThreadProcessId(hwnd, out pid);
+            if (pid == (uint)System.Diagnostics.Process.GetCurrentProcess().Id) return;
+            if (IsExcluded(hwnd)) return;
+
+            Rectangle frame = GetVisibleFrame(hwnd);
+            Point center = new Point(frame.Left + frame.Width / 2, frame.Top + frame.Height / 2);
+            int level = _level;
+            _level = BaseLevel;
+            GridGeometry geo = CreateGeometry(center);
+            _level = level;
+            Rectangle target = FracToRect(geo, z.Frac);
+
+            IntPtr h = hwnd;
+            ApplyWindowRect(h, target);
+            // noch einmal, falls das Fenster durch einen DPI-Wechsel seine Größe angepasst hat
+            Timer again = new Timer();
+            again.Interval = 150;
+            again.Tick += delegate
+            {
+                again.Stop();
+                again.Dispose();
+                ApplyWindowRect(h, target);
+            };
+            again.Start();
+        }
+
+        /// <summary>Unsichtbares Fenster, das die globalen Tastenkürzel empfängt.</summary>
+        private sealed class HotkeyWindow : NativeWindow
+        {
+            private readonly GridEngine _owner;
+            private bool _registered;
+
+            public HotkeyWindow(GridEngine owner)
+            {
+                _owner = owner;
+                CreateHandle(new CreateParams());
+            }
+
+            public void Register()
+            {
+                if (_registered) return;
+                uint mods = NativeMethods.MOD_CONTROL | NativeMethods.MOD_ALT | NativeMethods.MOD_WIN | NativeMethods.MOD_NOREPEAT;
+                int ok = 0;
+                for (int n = 1; n <= 9; n++)
+                    if (NativeMethods.RegisterHotKey(Handle, n, mods, (uint)(0x30 + n))) ok++;
+                _registered = true;
+                if (ok < 9) Log.Write("Tastenkürzel", (9 - ok) + " von 9 Kürzeln Strg+Win+Alt+Ziffer sind schon von einem anderen Programm belegt.");
+            }
+
+            public void Unregister()
+            {
+                if (!_registered) return;
+                for (int n = 1; n <= 9; n++) NativeMethods.UnregisterHotKey(Handle, n);
+                _registered = false;
+            }
+
+            protected override void WndProc(ref Message m)
+            {
+                if (m.Msg == NativeMethods.WM_HOTKEY)
+                {
+                    int n = m.WParam.ToInt32();
+                    try { _owner.ApplyZoneToActiveWindow(n); }
+                    catch (Exception ex) { Log.Write("Schnellzone per Tastenkürzel", ex); }
+                    return;
+                }
+                base.WndProc(ref m);
+            }
+
+            public void Close()
+            {
+                Unregister();
+                DestroyHandle();
+            }
         }
 
         // ------------------------------------------------------------------ Fenster ziehen
@@ -112,6 +251,7 @@ namespace WindowGrid
             {
                 if (_settings.Paused) return;
                 IntPtr root = NativeMethods.GetAncestor(hwnd, NativeMethods.GA_ROOT);
+                if (IsExcluded(root != IntPtr.Zero ? root : hwnd)) return; // Programm aus der Ausnahmeliste
                 _dragHwnd = root != IntPtr.Zero ? root : hwnd;
                 _dragging = true;
                 _mode = Mode.None;
@@ -626,6 +766,11 @@ namespace WindowGrid
         /// <summary>Bereich in Prozent des Rasterbereichs in ein Fensterrechteck umrechnen (mit Abstand).</summary>
         private Rectangle FracToRect(RectangleF f)
         {
+            return FracToRect(_geo, f);
+        }
+
+        private static Rectangle FracToRect(GridGeometry _geo, RectangleF f)
+        {
             int half2 = _geo.Gap / 2, half = _geo.Gap - _geo.Gap / 2;
             float x0 = _geo.Xs[0], x1 = _geo.Xs[_geo.Columns], y0 = _geo.Ys[0], y1 = _geo.Ys[_geo.Rows];
             int l = (int)Math.Round(x0 + (x1 - x0) * f.Left / 100f) + half2;
@@ -705,12 +850,12 @@ namespace WindowGrid
 
         private int LevelColumns(int level)
         {
-            return Math.Max(1, Math.Min(100, (int)Math.Round(_settings.Columns * Levels[level])));
+            return Math.Max(1, Math.Min(100, (int)Math.Round(_baseCols * Levels[level])));
         }
 
         private int LevelRows(int level)
         {
-            return Math.Max(1, Math.Min(100, (int)Math.Round(_settings.Rows * Levels[level])));
+            return Math.Max(1, Math.Min(100, (int)Math.Round(_baseRows * Levels[level])));
         }
 
         /// <summary>Mausrad: Raster feiner (+1) oder gröber (-1).</summary>
@@ -770,6 +915,19 @@ namespace WindowGrid
                 if (NativeMethods.GetDpiForMonitor(monitor, 0, out dx, out dy) == 0 && dx > 0) scale = dx / 96f;
             }
             catch { }
+
+            // Grundraster: eigenes Raster dieses Monitors, sonst Spalten/Zeilen aus den Einstellungen
+            _baseCols = _settings.Columns;
+            _baseRows = _settings.Rows;
+            if (_settings.Monitors.Count > 0)
+            {
+                try
+                {
+                    MonitorGrid own = _settings.GridFor(Settings.DeviceName(Screen.FromPoint(pt)));
+                    if (own != null) { _baseCols = own.Columns; _baseRows = own.Rows; }
+                }
+                catch { }
+            }
             return new GridGeometry(monitor, work, LevelColumns(_level), LevelRows(_level), _settings.Gap, scale);
         }
 
@@ -818,6 +976,7 @@ namespace WindowGrid
             if (_keyHook != IntPtr.Zero) { NativeMethods.UnhookWindowsHookEx(_keyHook); _keyHook = IntPtr.Zero; }
             RestoreSnap();
             if (_flashTimer != null) _flashTimer.Dispose();
+            if (_hotkeys != null) { try { _hotkeys.Close(); } catch { } _hotkeys = null; }
             _overlay.Dispose();
         }
     }

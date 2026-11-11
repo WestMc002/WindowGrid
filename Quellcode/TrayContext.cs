@@ -109,8 +109,11 @@ namespace WindowGrid
                 if (result != null && result.StartsWith("OK"))
                     _tray.ShowBalloonTip(6000, "WindowGrid aktualisiert", "Version " + result.Substring(2).Trim() + " ist installiert.", ToolTipIcon.Info);
                 else if (result != null)
+                {
+                    Log.Write("Update", result);
                     _tray.ShowBalloonTip(8000, "Update fehlgeschlagen",
                         result.Replace("FEHLER", "").Trim() + " – die bisherige Version läuft weiter.", ToolTipIcon.Warning);
+                }
             }
             AboutDialog.LiveSettings = _settings;
             AboutDialog.StartInstall = delegate
@@ -336,6 +339,7 @@ namespace WindowGrid
                 _form.Saved += delegate (object sender, EventArgs e)
                 {
                     UpdateTray();
+                    _engine.UpdateHotkeys(); // Strg+Win+Alt+1–9 an- oder abmelden
                     SettingsForm f = sender as SettingsForm;
                     if (f != null && f.RestartElevatedRequested)
                     {
@@ -343,9 +347,11 @@ namespace WindowGrid
                         _invoker.BeginInvoke((MethodInvoker)delegate
                         {
                             if (Autostart.RestartElevated()) ExitApp();
+                            else f.RestartElevatedRequested = false;
                         });
                     }
                 };
+                _form.ExitRequested += delegate { ExitApp(); };
                 _form.FormClosed += delegate
                 {
                     _form = null;
@@ -387,7 +393,7 @@ namespace WindowGrid
 
         private void ExitApp()
         {
-            if (_form != null && !_form.IsDisposed) _form.Close();
+            if (_form != null && !_form.IsDisposed) _form.CloseWithoutAsking();
             if (_updateTimer != null) _updateTimer.Stop();
             _tray.Visible = false;
             _showWait.Unregister(null);

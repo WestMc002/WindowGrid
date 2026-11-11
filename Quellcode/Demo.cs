@@ -86,7 +86,7 @@ namespace WindowGrid
                             Pump(200);
                         }
 
-                        Shot(backdrop, delegate { return new ZonesForm(QuickZone.Defaults(), icon); }, Path.Combine(outDir, "zonen-" + suffix + ".png"));
+                        Shot(backdrop, delegate { SettingsForm zf = new SettingsForm(settings, icon); zf.SelectPage(2); return zf; }, Path.Combine(outDir, "zonen-" + suffix + ".png"));
                         Shot(backdrop, delegate { return new AboutDialog(null); }, Path.Combine(outDir, "info-" + suffix + ".png"));
 
                         // Raster über dem Beispiel-Desktop

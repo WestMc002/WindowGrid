@@ -6,12 +6,17 @@
 using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.IO;
 using System.Windows.Forms;
 using Microsoft.Win32;
 
 namespace WindowGrid
 {
-    /// <summary>Einstellungsfenster – passt sich dem hellen/dunklen Windows-Design an.</summary>
+    /// <summary>
+    /// Einstellungsfenster mit Navigation links (globale Vorgabe, Vorlage Wake on LAN): Raster, Bedienung,
+    /// Schnellzonen, Darstellung und Allgemein sind Seiten in einem Fenster. Änderungen werden über alle Seiten
+    /// gesammelt und erst mit "Speichern" übernommen. Passt sich dem hellen/dunklen Windows-Design an.
+    /// </summary>
     internal sealed class SettingsForm : Form
     {
         private readonly Settings _original;
@@ -19,26 +24,48 @@ namespace WindowGrid
         private readonly float _sc;
         public event EventHandler Saved;
 
+        /// <summary>"Beenden" in der Navigation: WindowGrid ganz beenden (das X schließt nur das Fenster).</summary>
+        public event EventHandler ExitRequested;
+
         /// <summary>Nach dem Speichern soll WindowGrid mit Adminrechten neu gestartet werden.</summary>
         public bool RestartElevatedRequested;
 
+        // Maße in logischen Einheiten (× Skalierung)
+        private const int NavFull = 230, NavCompact = 68;      // Navigation aus- bzw. eingeklappt
+        private const int ContentW = 768;                      // 28 Rand + 712 Inhalt + 28 Rand
+        private const int HeaderH = 84, PageH = 520, FooterH = 64;
+
         private Stepper _cols, _rows, _gap;
         private GridPreview _preview;
-        private ToggleSwitch _resizeOn, _moveOn, _centerOn, _runAdmin;
+        private ToggleSwitch _resizeOn, _moveOn, _centerOn, _runAdmin, _zoneKeys;
+        private bool _discard; // "Abbrechen"/Esc: ohne Rückfrage schließen
         private HotkeyBox _resizeKey, _moveKey, _centerKey;
         private Label _keyHint;
         private Slider _dim;
         private Label _dimValue;
         private ToggleSwitch _sysAccent, _showSize, _showMargins, _animate, _autostart;
         private ColorSwatch _swatch;
-        private ModernButton _btnSave, _btnCancel, _btnDefaults;
+        private ModernButton _btnSave, _btnCancel;
         private Label _error; // Zeile links neben den Knöpfen: rote Fehler bzw. kurz grün "Gespeichert"
         private Timer _statusTimer;
-        private Card[] _cards;
         private PictureBox _logo;
         private UpdateBar _bar;
         private bool _barShown;
         private readonly EventHandler _onUpdateChanged;
+
+        // Navigation und Seiten
+        private Panel _content, _nav;
+        private Panel[] _pages;
+        private NavButton[] _navItems;
+        private NavButton _navMenu, _navPin, _navMore, _navQuit;
+        private bool _navOpen;       // ausgeklappt, obwohl nicht angepinnt (liegt dann über dem Inhalt)
+        private int _page;
+        private Timer _navTimer;
+        private ContextMenuStrip _moreMenu;
+        private ModernToolTip _tips;
+        private ZonesEditor _zones;
+        private MonitorsEditor _monitors;
+        private ExcludeEditor _excluded;
 
         public SettingsForm(Settings settings, Icon icon)
         {
@@ -56,10 +83,10 @@ namespace WindowGrid
             SizeGripStyle = SizeGripStyle.Hide;
             MaximizeBox = false;
             StartPosition = FormStartPosition.CenterScreen;
-            ClientSize = new Size(S(760), S(858));
             Font = Theme.UiFont(13.5f * _sc, FontStyle.Regular);
             KeyPreview = true;
             DoubleBuffered = true;
+            _navOpen = _original.NavPinned;
 
             BuildUi(icon);
             LoadValues();
@@ -83,31 +110,19 @@ namespace WindowGrid
                 _bar.Invalidate();
             }
             if (show == _barShown) return;
-            int d = S(64) * (show ? 1 : -1);
-            foreach (Control c in Controls)
-                if (c != _bar && c.Dock == DockStyle.None && c.Top >= S(80)) c.Top += d;
-            bool fixedSize = MinimumSize != Size.Empty;
-            MinimumSize = Size.Empty;
-            MaximumSize = Size.Empty;
-            ClientSize = new Size(ClientSize.Width, ClientSize.Height + d);
-            if (fixedSize) { MinimumSize = Size; MaximumSize = Size; }
-            if (IsHandleCreated)
-            {
-                Rectangle work = Screen.FromControl(this).WorkingArea;
-                if (Bottom > work.Bottom) Top = Math.Max(work.Top, work.Bottom - Height);
-            }
-            _bar.Visible = show;
             _barShown = show;
+            LayoutAll();
         }
 
         private int S(float v) { return (int)Math.Round(v * _sc); }
-
 
         // ------------------------------------------------------------------ Aufbau
 
         private void BuildUi(Icon icon)
         {
-            // Kopfbereich
+            _tips = new ModernToolTip();
+
+            // ---------- Kopfbereich (volle Breite) ----------
             _logo = new PictureBox();
             _logo.SizeMode = PictureBoxSizeMode.Zoom;
             _logo.Bounds = new Rectangle(S(24), S(20), S(44), S(44));
@@ -133,23 +148,27 @@ namespace WindowGrid
 
             // Versionsnummer als Pille – Klick öffnet "Info über WindowGrid"
             VersionPill version = new VersionPill();
-            version.Text = "Version " + AppInfo.Version;
+            version.Text = "Version " + AppInfo.ShownVersion;
             int vw;
             using (Font vf = Theme.UiFont(10.5f * _sc, FontStyle.Regular))
                 vw = TextRenderer.MeasureText(version.Text, vf, Size.Empty, np).Width + S(16); // Innenabstand je 8
             // direkt rechts neben dem Programmnamen (globale Vorgabe, Referenz Wake on LAN HeaderPanel), senkrecht mittig.
-            // Abstand ab dem letzten sichtbaren Pixel des Namens: 12 × Skalierung + 1 für den Rand des letzten Buchstabens
-            // (wie bei Wake on LAN sichtbar). Nicht ab der gemessenen Textbreite: Bei "Segoe UI Variable" meldet
-            // TextRenderer für Halbfett eine zu große Breite, der Abstand wirkte dadurch viel größer.
+            // Abstand ab dem letzten sichtbaren Pixel des Namens: 12 × Skalierung + 1 für den Rand des letzten Buchstabens.
+            // Nicht ab der gemessenen Textbreite: Die kann (z. B. bei "Segoe UI Variable" Halbfett) größer sein als die
+            // gezeichnete Schrift, der Abstand wirkt dann zu groß.
             int inkRight = NoPaddingLabel.InkRight(title);
             int textEnd = inkRight > 0 ? inkRight : ts.Width;
             version.Bounds = new Rectangle(title.Left + textEnd + S(13), title.Top + (ts.Height - S(21)) / 2, vw, S(21));
             version.Click += delegate { AboutDialog.ShowFor(this); };
             Controls.Add(version);
 
+            // ---------- Inhaltsbereich rechts neben der Navigation ----------
+            _content = new Panel();
+            Controls.Add(_content);
+
             // Hinweisleiste "Neue Version verfügbar" (nur sichtbar, wenn es ein Update gibt)
             _bar = new UpdateBar(_sc);
-            _bar.Bounds = new Rectangle(S(24), S(84), S(712), S(52));
+            _bar.Bounds = new Rectangle(S(28), 0, S(712), S(52));
             _bar.Visible = false;
             _bar.Install.Click += delegate
             {
@@ -163,49 +182,40 @@ namespace WindowGrid
             };
             _bar.Page.Click += delegate { Updater.OpenPage(); };
             _bar.Later.Click += delegate { ShowUpdateBar(false); };
-            Controls.Add(_bar);
+            _content.Controls.Add(_bar);
 
-            int top = S(88);
-            int colW = S(348);
-            int leftX = S(24), rightX = S(388);
+            _pages = new Panel[5];
+            for (int i = 0; i < _pages.Length; i++)
+            {
+                _pages[i] = new Panel();
+                _pages[i].Visible = i == 0;
+                _content.Controls.Add(_pages[i]);
+            }
+            int cardX = S(28), cardW = S(712);
 
-            // --- Karte: Raster
-            Card grid = MakeCard("Raster", new Rectangle(leftX, top, colW, S(480)));
+            // ================= Seite 1: Raster =================
+            Card grid = MakeCard(_pages[0], "Raster", new Rectangle(cardX, 0, cardW, S(190)));
             _cols = MakeStepper(1, 100, null);
             _rows = MakeStepper(1, 100, null);
             _gap = MakeStepper(0, 64, "px");
-            AddRow(grid, "Spalten", _cols, S(54));
-            AddRow(grid, "Zeilen", _rows, S(96));
-            AddRow(grid, "Abstand", _gap, S(138));
+            // Werte in der linken Hälfte, rechts daneben die Vorschau
+            int half = cardW - S(348);
+            AddRow(grid, "Spalten", _cols, S(54), half);
+            AddRow(grid, "Zeilen", _rows, S(96), half);
+            AddRow(grid, "Abstand", _gap, S(138), half);
             _preview = new GridPreview();
             _preview.UiScale = _sc;
-            _preview.Bounds = new Rectangle(S(18), S(190), colW - S(36), S(270));
+            _preview.Bounds = new Rectangle(S(366), S(18), S(328), S(154));
             grid.Controls.Add(_preview);
 
-            // --- Karte: Allgemein
-            Card general = MakeCard(null, new Rectangle(leftX, top + S(496), colW, S(140)));
-            _autostart = MakeToggle();
-            AddRow(general, "Mit Windows starten", _autostart, S(20));
-            _runAdmin = MakeToggle();
-            Label adminLabel = AddRow(general, "Mit Administratorrechten", _runAdmin, S(58));
-            ToolTip adminTip = new ModernToolTip();
-            adminTip.SetToolTip(adminLabel,
-                "Nötig, damit WindowGrid auch Fenster von Programmen anordnen kann,\n" +
-                "die als Administrator laufen. Der Autostart läuft dann über die\n" +
-                "Aufgabenplanung – Windows fragt nur beim Einrichten einmal nach.");
-            ModernButton snapButton = new ModernButton();
-            snapButton.Text = "Öffnen …";
-            snapButton.Size = new Size(S(100), S(30));
-            Label snapLabel = AddRow(general, "Windows-Andocklayouts", snapButton, S(96));
-            snapButton.Click += delegate { SnapBar.OpenWindowsSettings(); };
-            adminTip.SetToolTip(snapLabel,
-                "Öffnet Einstellungen → System → Multitasking. Dort den Haken bei\n" +
-                "„Andocklayouts anzeigen, wenn ich ein Fenster an den oberen Bildschirmrand ziehe“\n" +
-                "entfernen, damit sich die Windows-Leiste nicht mit dem Raster überlagert.");
-            adminTip.SetToolTip(snapButton, "Windows-Einstellung für die Andocklayouts öffnen");
+            Card monitors = MakeCard(_pages[0], "Raster je Monitor", new Rectangle(cardX, S(206), cardW, S(MonitorsEditor.CardHeight)));
+            Label monitorsSub = MakeLabel("Sonst gelten Spalten und Zeilen von oben.", 12.5f, false, true);
+            monitorsSub.Location = new Point(S(18), S(46));
+            monitors.Controls.Add(monitorsSub);
+            _monitors = new MonitorsEditor(monitors, _sc);
 
-            // --- Karte: Bedienung
-            Card input = MakeCard("Bedienung", new Rectangle(rightX, top, colW, S(330)));
+            // ================= Seite 2: Bedienung =================
+            Card input = MakeCard(_pages[1], "Bedienung", new Rectangle(cardX, 0, cardW, S(300)));
             Label hint = MakeLabel("Beim Ziehen eines Fensters (linke Maustaste):", 12.5f, false, true);
             hint.Location = new Point(S(18), S(44));
             input.Controls.Add(hint);
@@ -221,17 +231,31 @@ namespace WindowGrid
             _centerKey = MakeHotkey();
             AddRow(input, "Zentrieren", _centerOn, S(172));
             PlaceHotkey(input, _centerKey, _centerOn);
-            ModernButton zones = new ModernButton();
-            zones.Text = "Bearbeiten …";
-            zones.Size = new Size(S(124), S(30));
-            AddRow(input, "Schnellzonen 1–9", zones, S(218));
-            zones.Click += delegate { EditZones(); };
+            _zoneKeys = MakeToggle();
+            Label zoneKeysLabel = AddRow(input, "Schnellzonen mit Strg+Win+Alt+1–9", _zoneKeys, S(218));
+            _tips.SetToolTip(zoneKeysLabel,
+                "Setzt das gerade aktive Fenster ohne Maus auf die Schnellzone 1–9,\n" +
+                "auf dem Monitor, auf dem es liegt.");
             _keyHint = MakeLabel(KeyHintText, 12.5f, false, true);
-            _keyHint.Location = new Point(S(18), S(262));
+            _keyHint.Location = new Point(S(18), S(258));
             input.Controls.Add(_keyHint);
 
-            // --- Karte: Darstellung
-            Card look = MakeCard("Darstellung", new Rectangle(rightX, top + S(346), colW, S(290)));
+            // ================= Seite 3: Schnellzonen =================
+            Label zonesSub = MakeLabel(
+                "Bei sichtbarem Raster Ziffer 1–9 drücken, um das Fenster auf die Zone zu setzen.\n" +
+                "Umschalt+Ziffer speichert die aktuelle Auswahl als Zone. Werte in Prozent des Bildschirms.", 12.5f, false, true);
+            zonesSub.Location = new Point(S(30), 0);
+            _pages[2].Controls.Add(zonesSub);
+            ModernButton zoneDefaults = new ModernButton();
+            zoneDefaults.Text = "Standardzonen";
+            zoneDefaults.Bounds = new Rectangle(cardX + cardW - S(140), S(2), S(140), S(30));
+            _pages[2].Controls.Add(zoneDefaults);
+            Card zonesCard = MakeCard(_pages[2], null, new Rectangle(cardX, S(44), cardW, S(ZonesEditor.CardHeight)));
+            _zones = new ZonesEditor(zonesCard, _sc);
+            zoneDefaults.Click += delegate { _zones.Load(QuickZone.Defaults()); };
+
+            // ================= Seite 4: Darstellung =================
+            Card look = MakeCard(_pages[3], "Darstellung", new Rectangle(cardX, 0, cardW, S(290)));
             _dim = new Slider();
             _dim.Minimum = 0;
             _dim.Maximum = 80;
@@ -241,7 +265,7 @@ namespace WindowGrid
             _dimValue.TextAlign = ContentAlignment.MiddleRight;
             _dimValue.Size = new Size(S(44), S(24));
             AddRow(look, "Abdunkelung", _dim, S(54), S(52));
-            _dimValue.Location = new Point(colW - S(18) - _dimValue.Width, S(54));
+            _dimValue.Location = new Point(cardW - S(18) - _dimValue.Width, S(54));
             look.Controls.Add(_dimValue);
 
             _sysAccent = MakeToggle();
@@ -256,30 +280,95 @@ namespace WindowGrid
             _animate = MakeToggle();
             AddRow(look, "Einblenden animieren", _animate, S(244));
 
-            _cards = new[] { grid, general, input, look };
+            // ================= Seite 5: Allgemein =================
+            Card general = MakeCard(_pages[4], "Allgemein", new Rectangle(cardX, 0, cardW, S(178)));
+            _autostart = MakeToggle();
+            AddRow(general, "Mit Windows starten", _autostart, S(54));
+            _runAdmin = MakeToggle();
+            Label adminLabel = AddRow(general, "Mit Administratorrechten", _runAdmin, S(92));
+            _tips.SetToolTip(adminLabel,
+                "Nötig, damit WindowGrid auch Fenster von Programmen anordnen kann,\n" +
+                "die als Administrator laufen. Der Autostart läuft dann über die\n" +
+                "Aufgabenplanung – Windows fragt nur beim Einrichten einmal nach.");
+            ModernButton snapButton = new ModernButton();
+            snapButton.Text = "Öffnen …";
+            snapButton.Size = new Size(S(100), S(30));
+            Label snapLabel = AddRow(general, "Windows-Andocklayouts", snapButton, S(130));
+            snapButton.Click += delegate { SnapBar.OpenWindowsSettings(); };
+            _tips.SetToolTip(snapLabel,
+                "Öffnet Einstellungen → System → Multitasking. Dort den Haken bei\n" +
+                "„Andocklayouts anzeigen, wenn ich ein Fenster an den oberen Bildschirmrand ziehe“\n" +
+                "entfernen, damit sich die Windows-Leiste nicht mit dem Raster überlagert.");
+            _tips.SetToolTip(snapButton, "Windows-Einstellung für die Andocklayouts öffnen");
 
-            // --- Schaltflächen
-            int by = S(742);
-            _btnDefaults = MakeButton("Standardwerte", false, new Rectangle(leftX, by, S(140), S(34)));
-            // "Abbrechen" links, "Speichern" (primär) ganz rechts, 10 Abstand; links davon die Fehlerzeile
-            _btnCancel = MakeButton("Abbrechen", false, new Rectangle(S(736) - S(120) - S(10) - S(120), by, S(120), S(34)));
-            _btnSave = MakeButton("Speichern", true, new Rectangle(S(736) - S(120), by, S(120), S(34)));
+            Card exclude = MakeCard(_pages[4], "Ausnahmen", new Rectangle(cardX, S(194), cardW, S(280)));
+            _excluded = new ExcludeEditor(exclude, _sc);
+            exclude.Height = S(_excluded.CardHeight);
+
+            // ---------- Schaltflächen unter den Seiten (gelten für alle Seiten zusammen) ----------
+            // "Abbrechen" links, "Speichern" (primär) ganz rechts, 10 Abstand; links davon die Statuszeile
+            _btnCancel = MakeButton("Abbrechen", false, new Rectangle(0, 0, S(120), S(34)));
+            _btnSave = MakeButton("Speichern", true, new Rectangle(0, 0, S(120), S(34)));
+            _content.Controls.Add(_btnCancel);
+            _content.Controls.Add(_btnSave);
             _error = MakeLabel("", 12.5f, false, false);
             _error.AutoSize = false;
             _error.AutoEllipsis = true;
             _error.TextAlign = ContentAlignment.MiddleLeft;
             _error.Tag = "error";
-            _error.Bounds = new Rectangle(leftX + S(140) + S(12), by, _btnCancel.Left - S(12) - (leftX + S(140) + S(12)), S(34));
-            Controls.Add(_error);
-            _btnDefaults.Click += delegate { Settings d = new Settings(); d.FirstRun = false; d.Paused = _edit.Paused; d.LastSelection = _edit.LastSelection; d.LastUpdateCheck = _edit.LastUpdateCheck; d.UpdateCheck = _edit.UpdateCheck; _edit.CopyFrom(d); LoadValues(false); };
-            _btnCancel.Click += delegate { Close(); };
+            _content.Controls.Add(_error);
+            _btnCancel.Click += delegate { _discard = true; Close(); };
             _btnSave.Click += delegate { Save(); };
 
-            // --- Fußzeile (einheitlich in allen Projekten)
+            // ---------- Navigation links ----------
+            _nav = new Panel();
+            _nav.Paint += delegate (object s, PaintEventArgs e)
+            {
+                // ausgeklappt über dem Inhalt: feine Trennlinie rechts
+                if (_navOpen && !_original.NavPinned)
+                    using (Pen pen = new Pen(Theme.Current.CardBorder)) e.Graphics.DrawLine(pen, _nav.Width - 1, 0, _nav.Width - 1, _nav.Height);
+            };
+            _navMenu = AddNav("", '', delegate
+            {
+                if (_original.NavPinned) SetNavPinned(false);
+                else { _navOpen = !_navOpen; LayoutAll(); }
+            });
+            _tips.SetToolTip(_navMenu, "Navigation aus- bzw. einklappen");
+            _navPin = AddNav("", '', delegate { SetNavPinned(!_original.NavPinned); });
+            _navPin.IconOnly = true;
+            string[] names = { "Raster", "Bedienung", "Schnellzonen", "Darstellung", "Allgemein" };
+            char[] glyphs = { '', MenuHelper.Keyboard, '', '', '' };
+            _navItems = new NavButton[names.Length];
+            for (int i = 0; i < names.Length; i++)
+            {
+                int index = i;
+                _navItems[i] = AddNav(names[i], glyphs[i], delegate { SelectPage(index); CloseNav(); });
+            }
+            _navItems[0].Selected = true;
+            // unten: Extras (Zahnrad, öffnet ein Menü rechts über dem Knopf), darunter Beenden
+            _navMore = AddNav("Extras", MenuHelper.Settings, ShowMoreMenu);
+            _navQuit = AddNav("Beenden", MenuHelper.Power, QuitProgram);
+            _tips.SetToolTip(_navQuit, "WindowGrid ganz beenden (das X schließt nur dieses Fenster)");
+            Controls.Add(_nav); // liegt ausgeklappt über dem Inhalt
+
+            // ---------- Fußzeile (einheitlich in allen Projekten) ----------
             SignatureFooter footer = new SignatureFooter(_sc);
             footer.Dock = DockStyle.Bottom;   // volle Breite, unterhalb des Fensterinhalts
-            footer.Height = S(64);
+            footer.Height = S(FooterH);
             Controls.Add(footer);
+
+            // ausgeklappt, nicht angepinnt: wieder einklappen, sobald die Maus die Navigation verlässt
+            _navTimer = new Timer();
+            _navTimer.Interval = 250;
+            _navTimer.Tick += delegate
+            {
+                if (!_navOpen || _original.NavPinned || !Visible) return;
+                if (_moreMenu != null && _moreMenu.Visible) return;
+                if (!_nav.RectangleToScreen(_nav.ClientRectangle).Contains(Cursor.Position)) { _navOpen = false; LayoutAll(); }
+            };
+            _navTimer.Start();
+
+            LayoutAll();
 
             // Live-Vorschau
             EventHandler preview = delegate { UpdatePreview(); };
@@ -297,13 +386,202 @@ namespace WindowGrid
             _centerKey.KeyChanged += delegate { CheckKeyConflict(); };
         }
 
-        private Card MakeCard(string title, Rectangle bounds)
+        // ------------------------------------------------------------------ Navigation und Seiten
+
+        private NavButton AddNav(string text, char glyph, MethodInvoker click)
+        {
+            NavButton b = new NavButton(text, glyph, _sc);
+            b.Click += delegate { click(); };
+            _nav.Controls.Add(b);
+            return b;
+        }
+
+        /// <summary>Seite anzeigen: 0 Raster, 1 Bedienung, 2 Schnellzonen, 3 Darstellung, 4 Allgemein.</summary>
+        public void SelectPage(int index)
+        {
+            if (index < 0 || index >= _pages.Length) return;
+            _page = index;
+            for (int i = 0; i < _pages.Length; i++)
+            {
+                _pages[i].Visible = i == index;
+                _navItems[i].Selected = i == index;
+            }
+        }
+
+        /// <summary>Ausgeklappte (nicht angepinnte) Navigation nach einer Auswahl wieder einklappen.</summary>
+        private void CloseNav()
+        {
+            if (!_original.NavPinned && _navOpen) { _navOpen = false; LayoutAll(); }
+        }
+
+        private void SetNavPinned(bool pinned)
+        {
+            _original.NavPinned = pinned;
+            _edit.NavPinned = pinned;
+            if (!Demo.Active) { try { _original.Save(); } catch { } } // gilt sofort, unabhängig von "Speichern"
+            _navOpen = pinned;
+            LayoutAll();
+        }
+
+        /// <summary>Alles anordnen: Navigation (angepinnt schiebt sie den Inhalt), Hinweisleiste, Seiten, Knöpfe, Fenstergröße.</summary>
+        private void LayoutAll()
+        {
+            if (_nav == null || _content == null) return;
+            bool pinned = _original.NavPinned;
+            bool open = pinned || _navOpen;
+            int navW = S(pinned ? NavFull : NavCompact);
+            int barH = _barShown ? S(64) : 0;
+            int pagesTop = barH + S(4);
+            int by = pagesTop + S(PageH) + S(18);
+            int contentH = by + S(34) + S(18);
+
+            _content.Bounds = new Rectangle(navW, S(HeaderH), S(ContentW), contentH);
+            _bar.Visible = _barShown;
+            foreach (Panel page in _pages) page.Bounds = new Rectangle(0, pagesTop, S(ContentW), S(PageH));
+            int right = S(ContentW) - S(28);
+            _btnSave.Bounds = new Rectangle(right - S(120), by, S(120), S(34));
+            _btnCancel.Bounds = new Rectangle(right - S(120) - S(10) - S(120), by, S(120), S(34));
+            _error.Bounds = new Rectangle(S(28), by, _btnCancel.Left - S(12) - S(28), S(34));
+
+            SetClient(new Size(navW + S(ContentW), S(HeaderH) + contentH + S(FooterH)));
+
+            _nav.Bounds = new Rectangle(0, S(HeaderH), S(open ? NavFull : NavCompact), contentH);
+            _nav.BringToFront();
+            _navPin.Visible = open;
+            _navPin.Glyph = pinned ? '' : '';
+            _tips.SetToolTip(_navPin, pinned ? "Navigation lösen (einklappbar)" : "Navigation anpinnen");
+            LayoutNav();
+            _nav.Invalidate(true);
+        }
+
+        private void LayoutNav()
+        {
+            int x = S(10), w = _nav.Width - S(20), h = S(40);
+            int y = S(4);
+            _navMenu.SetBounds(x, y, S(48), h);
+            _navPin.SetBounds(_nav.Width - S(10) - S(36), y + (h - S(36)) / 2, S(36), S(36));
+            y += h + S(10);
+            foreach (NavButton b in _navItems)
+            {
+                b.SetBounds(x, y, w, h);
+                y += h + S(4);
+            }
+            int bottom = _nav.Height - S(14);
+            _navQuit.SetBounds(x, bottom - h, w, h);
+            bottom -= h + S(4);
+            _navMore.SetBounds(x, bottom - h, w, h);
+        }
+
+        /// <summary>Fenstergröße ändern, obwohl sie sonst fest ist; das Fenster bleibt auf dem Bildschirm.</summary>
+        private void SetClient(Size size)
+        {
+            if (ClientSize == size) return;
+            bool fixedSize = MinimumSize != Size.Empty;
+            MinimumSize = Size.Empty;
+            MaximumSize = Size.Empty;
+            ClientSize = size;
+            if (fixedSize) { MinimumSize = Size; MaximumSize = Size; }
+            if (IsHandleCreated)
+            {
+                Rectangle work = Screen.FromControl(this).WorkingArea;
+                if (Bottom > work.Bottom) Top = Math.Max(work.Top, work.Bottom - Height);
+                if (Right > work.Right) Left = Math.Max(work.Left, work.Right - Width);
+            }
+        }
+
+        /// <summary>"Extras": Menü rechts über dem Knopf (Info, Anleitung, Protokoll, Export/Import, Standardwerte).</summary>
+        private void ShowMoreMenu()
+        {
+            if (_moreMenu != null) { _moreMenu.Dispose(); _moreMenu = null; }
+            MenuTheme theme = MenuTheme.Current();
+            ContextMenuStrip m = new ContextMenuStrip();
+            m.Renderer = new ModernRenderer(theme, _sc);
+            m.Font = new Font("Segoe UI", 9.5f);
+            m.ShowCheckMargin = false;
+            m.ShowItemToolTips = false;
+            // Ab Windows 11 zeichnet das System selbst einen Schatten – den alten WinForms-Schatten abschalten
+            if (Environment.OSVersion.Version.Build >= 22000) m.DropShadowEnabled = false;
+            m.ShowImageMargin = true;
+            m.ImageScalingSize = new Size((int)(36 * _sc), (int)(16 * _sc));
+            m.Padding = new Padding(0, (int)(4 * _sc), 0, (int)(4 * _sc));
+
+            m.Items.Add(MoreItem(m, theme, "Info über WindowGrid", MenuHelper.Info, delegate { AboutDialog.ShowFor(this); }));
+            m.Items.Add(MoreItem(m, theme, "Anleitung öffnen", MenuHelper.Document, delegate { OpenFile(Path.Combine(AppInfo.ExeDirectory, "Anleitung.txt"), "Die Anleitung wurde nicht gefunden."); }));
+            m.Items.Add(MoreItem(m, theme, "Fehlerprotokoll öffnen", MenuHelper.Log, delegate { OpenFile(Log.FilePath, "Es gibt noch kein Fehlerprotokoll."); }));
+            m.Items.Add(new ToolStripSeparator());
+            m.Items.Add(MoreItem(m, theme, "Einstellungen exportieren …", '', ExportSettings));
+            m.Items.Add(MoreItem(m, theme, "Einstellungen importieren …", MenuHelper.Download, ImportSettings));
+            m.Items.Add(new ToolStripSeparator());
+            m.Items.Add(MoreItem(m, theme, "Standardwerte", MenuHelper.Refresh, ResetDefaults));
+            m.Items.Add(new MenuSpacer((int)(6 * _sc)));
+
+            _moreMenu = m;
+            _navMore.Selected = true; // ausgewählt, solange das Menü offen ist
+            m.Closed += delegate
+            {
+                if (!_navMore.IsDisposed) _navMore.Selected = false;
+                CloseNav();
+            };
+            m.Show(_navMore, new Point(_navMore.Width + S(4), _navMore.Height), ToolStripDropDownDirection.AboveRight);
+        }
+
+        private GlyphMenuItem MoreItem(ContextMenuStrip menu, MenuTheme theme, string text, char glyph, MethodInvoker action)
+        {
+            GlyphMenuItem item = new GlyphMenuItem(text);
+            int pad = (int)(5 * _sc);
+            int iconW = (int)(36 * _sc);
+            item.Padding = new Padding(0, pad, (int)(8 * _sc), pad);
+            item.FixedHeight = TextRenderer.MeasureText("Ag", menu.Font).Height + (int)(8 * _sc);
+            if (glyph != '\0') item.Glyph = MenuHelper.Glyph(glyph, theme.Text, (int)(16 * _sc));
+            // Unsichtbarer Platzhalter: reserviert die volle Breite der Symbolspalte
+            item.Image = MenuHelper.Blank(iconW, (int)(16 * _sc));
+            item.ImageScaling = ToolStripItemImageScaling.None;
+            item.Click += delegate { action(); };
+            return item;
+        }
+
+        private void OpenFile(string path, string missing)
+        {
+            try
+            {
+                if (!File.Exists(path)) { SetStatus(missing, false); return; }
+                System.Diagnostics.Process.Start(path);
+            }
+            catch (Exception ex) { SetStatus(ex.Message, false); }
+        }
+
+        /// <summary>Alle Seiten auf die Standardwerte setzen; gilt erst nach "Speichern".</summary>
+        private void ResetDefaults()
+        {
+            Settings d = new Settings();
+            _edit.CopyFrom(d);
+            SyncRuntimeFields();
+            LoadValues(false);
+            SetStatus("Standardwerte geladen – mit „Speichern“ übernehmen", true);
+        }
+
+        /// <summary>"Beenden": WindowGrid ganz beenden, bei ungespeicherten Änderungen vorher nachfragen.</summary>
+        private void QuitProgram()
+        {
+            if (Demo.Active) return;
+            if (HasChanges())
+            {
+                DialogResult r = MessageBox.Show(this,
+                    "Die Änderungen sind noch nicht gespeichert.\n\nWindowGrid trotzdem beenden?",
+                    "WindowGrid", MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2);
+                if (r != DialogResult.Yes) return;
+            }
+            _discard = true;
+            if (ExitRequested != null) ExitRequested(this, EventArgs.Empty);
+        }
+
+        private Card MakeCard(Control parent, string title, Rectangle bounds)
         {
             Card c = new Card();
             c.Title = title;
             c.UiScale = _sc;
             c.Bounds = bounds;
-            Controls.Add(c);
+            parent.Controls.Add(c);
             return c;
         }
 
@@ -352,11 +630,87 @@ namespace WindowGrid
         private const string KeyHintText =
             "Im Raster: Pfeile verschieben, Umschalt+Pfeile ändern die Größe, Größe-Taste doppelt = letzte Auswahl, Esc blendet aus.";
 
-        /// <summary>Schnellzonen-Fenster öffnen; Änderungen werden mit "Speichern" übernommen.</summary>
-        private void EditZones()
+        private void ExportSettings()
         {
-            using (ZonesForm f = new ZonesForm(_edit.Zones, Icon))
-                f.ShowDialog(this);
+            using (SaveFileDialog d = new SaveFileDialog())
+            {
+                d.Title = "Einstellungen exportieren";
+                d.Filter = "WindowGrid-Einstellungen (*.ini)|*.ini|Alle Dateien (*.*)|*.*";
+                d.FileName = "WindowGrid.ini";
+                d.OverwritePrompt = true;
+                if (d.ShowDialog(this) != DialogResult.OK) return;
+                try
+                {
+                    // was im Fenster steht (auch noch nicht Gespeichertes)
+                    ReadValues();
+                    SyncRuntimeFields();
+                    _edit.SaveTo(d.FileName);
+                    SetStatus("Exportiert", true);
+                }
+                catch (Exception ex)
+                {
+                    Log.Write("Export", ex);
+                    SetStatus("Export fehlgeschlagen: " + ex.Message, false);
+                }
+            }
+        }
+
+        private void ImportSettings()
+        {
+            using (OpenFileDialog d = new OpenFileDialog())
+            {
+                d.Title = "Einstellungen importieren";
+                d.Filter = "WindowGrid-Einstellungen (*.ini)|*.ini|Alle Dateien (*.*)|*.*";
+                if (d.ShowDialog(this) != DialogResult.OK) return;
+                Settings loaded = Settings.LoadFrom(d.FileName);
+                if (loaded == null)
+                {
+                    SetStatus("Die Datei enthält keine WindowGrid-Einstellungen.", false);
+                    return;
+                }
+                _edit.CopyFrom(loaded);
+                SyncRuntimeFields();
+                LoadValues(false);
+                SetStatus("Importiert – mit „Speichern“ übernehmen", true);
+            }
+        }
+
+        /// <summary>Werte, die nicht in diesem Fenster eingestellt werden, vom laufenden Programm übernehmen.</summary>
+        private void SyncRuntimeFields()
+        {
+            _edit.LastSelection = _original.LastSelection;
+            _edit.SnapBarOriginal = _original.SnapBarOriginal;
+            _edit.LastUpdateCheck = _original.LastUpdateCheck;
+            _edit.UpdateCheck = _original.UpdateCheck; // wird im Info-Fenster eingestellt
+            _edit.Paused = _original.Paused;           // wird im Tray-Menü eingestellt
+            _edit.FirstRun = _original.FirstRun;
+            _edit.NavPinned = _original.NavPinned;     // Stecknadel der Navigation, gilt sofort
+        }
+
+        /// <summary>Steht im Fenster etwas anderes als gespeichert ist?</summary>
+        private bool HasChanges()
+        {
+            try
+            {
+                ReadValues();
+                SyncRuntimeFields();
+                if (_edit.ToIni() != _original.ToIni()) return true;
+                return _autostart.Checked != Autostart.IsEnabled;
+            }
+            catch { return false; }
+        }
+
+        protected override void OnFormClosing(FormClosingEventArgs e)
+        {
+            // Schließen über das X mit ungespeicherten Änderungen: nachfragen ("Abbrechen" und Esc verwerfen ohne Rückfrage)
+            if (e.CloseReason == CloseReason.UserClosing && !_discard && !Demo.Active && !RestartElevatedRequested && HasChanges())
+            {
+                DialogResult r = MessageBox.Show(this,
+                    "Die Änderungen sind noch nicht gespeichert.\n\nÄnderungen verwerfen?",
+                    "WindowGrid", MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2);
+                if (r != DialogResult.Yes) e.Cancel = true;
+            }
+            base.OnFormClosing(e);
         }
 
         private void CheckKeyConflict()
@@ -365,7 +719,7 @@ namespace WindowGrid
             _keyHint.Text = same
                 ? "Zwei Funktionen haben dieselbe Taste – bitte unterschiedliche Tasten wählen."
                 : KeyHintText;
-            _keyHint.MaximumSize = new Size(S(312), 0);
+            _keyHint.MaximumSize = new Size(S(676), 0);
         }
 
         private ModernButton MakeButton(string text, bool primary, Rectangle bounds)
@@ -423,6 +777,7 @@ namespace WindowGrid
             _centerKey.Key = _edit.CenterKey;
             _centerKey.Enabled = _edit.CenterEnabled;
             _runAdmin.Checked = _edit.RunAsAdmin;
+            _zoneKeys.Checked = _edit.ZoneHotkeys;
             CheckKeyConflict();
             _dim.Value = _edit.Dim;
             _dimValue.Text = _edit.Dim + " %";
@@ -433,6 +788,9 @@ namespace WindowGrid
             _showMargins.Checked = _edit.ShowMargins;
             _animate.Checked = _edit.Animate;
             if (includeAutostart) _autostart.Checked = Demo.Active || Autostart.IsEnabled;
+            _zones.Load(_edit.Zones);
+            _monitors.Load(_edit.Monitors, _edit.Columns, _edit.Rows);
+            _excluded.Text = _edit.Excluded;
             UpdatePreview();
         }
 
@@ -448,12 +806,16 @@ namespace WindowGrid
             _edit.CenterEnabled = _centerOn.Checked;
             _edit.CenterKey = _centerKey.Key;
             _edit.RunAsAdmin = _runAdmin.Checked;
+            _edit.ZoneHotkeys = _zoneKeys.Checked;
             _edit.Dim = _dim.Value;
             _edit.UseSystemAccent = _sysAccent.Checked;
             _edit.CustomColor = _swatch.Color;
             _edit.ShowSize = _showSize.Checked;
             _edit.ShowMargins = _showMargins.Checked;
             _edit.Animate = _animate.Checked;
+            _zones.Read(_edit.Zones);
+            _monitors.Read(_edit.Monitors);
+            _edit.Excluded = _excluded.Text;
         }
 
         private Color CurrentAccent
@@ -474,8 +836,16 @@ namespace WindowGrid
             InvalidateAll(this);
         }
 
+        /// <summary>Schließen ohne Rückfrage (Programmende, Update).</summary>
+        public void CloseWithoutAsking()
+        {
+            _discard = true;
+            Close();
+        }
+
         private void Save()
         {
+            RestartElevatedRequested = false;
             SetStatus("", false);
             // erst prüfen, dann speichern – bei einem Fehler bleibt das Fenster offen
             int[] keys = { _resizeOn.Checked ? _resizeKey.Key : -1, _moveOn.Checked ? _moveKey.Key : -2, _centerOn.Checked ? _centerKey.Key : -3 };
@@ -486,10 +856,7 @@ namespace WindowGrid
             }
             ReadValues();
             // Die letzte Auswahl merkt sich WindowGrid laufend – nicht mit dem Stand beim Öffnen überschreiben
-            _edit.LastSelection = _original.LastSelection;
-            _edit.SnapBarOriginal = _original.SnapBarOriginal;
-            _edit.LastUpdateCheck = _original.LastUpdateCheck;
-            _edit.UpdateCheck = _original.UpdateCheck; // wird im Info-Fenster eingestellt
+            SyncRuntimeFields();
             bool adminChanged = _edit.RunAsAdmin != _original.RunAsAdmin;
             bool autoWanted = _autostart.Checked;
             bool autoNow = Autostart.IsEnabled;
@@ -576,6 +943,7 @@ namespace WindowGrid
                     c.ForeColor = tag == "error" ? ErrorColor(p) : tag == "ok" ? OkColor(p) : tag == "sub" ? p.SubText : p.Text;
                 }
                 if (c is GridPreview) c.BackColor = p.Card;
+                if (c is TextField) continue; // zeichnet sich selbst passend zum Farbschema
                 if (c.Controls.Count > 0) ApplyTheme(c, p);
             }
         }
@@ -635,7 +1003,7 @@ namespace WindowGrid
         {
             bool capturing = _resizeKey.Capturing || _moveKey.Capturing || _centerKey.Capturing;
             // Esc = Abbrechen, Enter = Speichern (außer ein Knopf hat den Fokus – der löst selbst aus)
-            if (e.KeyCode == Keys.Escape && !capturing) { Close(); e.Handled = true; }
+            if (e.KeyCode == Keys.Escape && !capturing) { _discard = true; Close(); e.Handled = true; }
             else if (e.KeyCode == Keys.Enter && e.Modifiers == Keys.None && !capturing && !(ActiveControl is ModernButton))
             {
                 Save();
@@ -652,6 +1020,9 @@ namespace WindowGrid
                 SystemEvents.UserPreferenceChanged -= OnUserPreferenceChanged;
                 Updater.AvailableChanged -= _onUpdateChanged;
                 if (_statusTimer != null) _statusTimer.Dispose();
+                if (_navTimer != null) _navTimer.Dispose();
+                if (_moreMenu != null) _moreMenu.Dispose();
+                if (_tips != null) _tips.Dispose();
                 if (_logo != null && _logo.Image != null) _logo.Image.Dispose();
             }
             base.Dispose(disposing);

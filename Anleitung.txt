@@ -48,9 +48,30 @@ Bei sichtbarem Raster eine Ziffer 1–9 drücken (oben oder Ziffernblock): Das F
 springt sofort auf die gespeicherte Zone, z. B. 1 = linke Hälfte, 2 = rechte Hälfte,
 3 = mittleres Drittel. Gleiche Ziffer nochmal = Zone wieder aus.
 Umschalt+Ziffer speichert die aktuelle Auswahl als diese Zone.
-Bearbeiten: Einstellungen -> Bedienung -> Schnellzonen "Bearbeiten …" (Name und
-Bereich in Prozent des Bildschirms, mit kleiner Vorschau). Die Zonen gelten auf
+Bearbeiten: Einstellungen -> Seite "Schnellzonen" (Name und Bereich in Prozent
+des Bildschirms, mit kleiner Vorschau). Die Zonen gelten auf
 jedem Monitor und unabhängig von der Rasterfeinheit.
+
+Schnellzonen ohne Maus
+----------------------
+Strg+Win+Alt+1 bis 9 setzt das gerade aktive Fenster direkt auf die Schnellzone –
+auf dem Monitor, auf dem es liegt, ohne es zu ziehen. Abschaltbar unter
+Einstellungen -> Bedienung -> "Schnellzonen mit Strg+Win+Alt+1–9".
+
+Raster je Monitor
+-----------------
+Einstellungen -> Seite "Raster" -> "Raster je Monitor": Für jeden
+angeschlossenen Monitor lässt sich ein eigenes Raster (Spalten/Zeilen) einschalten,
+z. B. für einen Hochkant- oder sehr breiten Bildschirm. Monitore ohne eigenes
+Raster verwenden die Werte "Spalten" und "Zeilen" darüber.
+
+Ausnahmen
+---------
+Einstellungen -> Seite "Allgemein" -> "Ausnahmen": Bei den dort eingetragenen Programmen
+zeigt WindowGrid kein Raster und setzt sie nicht per Tastenkürzel – z. B. Spiele
+oder Programme, die die Leertaste beim Ziehen selbst brauchen. Eingetragen wird
+der Programmname ohne ".exe", mehrere mit Semikolon getrennt. Gerade geöffnete
+Programme lassen sich per Klick hinzufügen.
 
 Feinjustieren mit den Pfeiltasten
 ---------------------------------
@@ -96,7 +117,8 @@ Gibt es eine, erscheinen
     "Release-Seite" und "Später".
 "Jetzt aktualisieren" lädt das ZIP von GitHub, beendet WindowGrid, ersetzt
 WindowGrid.exe und Anleitung.txt und startet WindowGrid neu. Die Einstellungen
-(WindowGrid.ini) bleiben erhalten. Liegt WindowGrid in einem Ordner ohne
+(WindowGrid.ini) bleiben erhalten. Vor dem Ersetzen vergleicht WindowGrid die
+Prüfsumme (SHA-256) des Downloads mit der Angabe von GitHub. Liegt WindowGrid in einem Ordner ohne
 Schreibrechte (z. B. unter Programme), fragt Windows einmal nach Administratorrechten.
 Im Projektordner (mit Erstellen.bat) wird nicht automatisch ersetzt – dort öffnet
 sich stattdessen die Release-Seite.
@@ -118,6 +140,13 @@ Tray-Symbol (unten rechts neben der Uhr)
 
 Einstellungen
 -------------
+Links die Navigation mit den Seiten Raster, Bedienung, Schnellzonen, Darstellung und
+Allgemein. Oben links klappt der Knopf mit den drei Strichen die Navigation ein oder
+aus, die Stecknadel pinnt sie an. Unten in der Navigation: "Extras" (Info, Anleitung,
+Fehlerprotokoll, Export/Import, Standardwerte) und "Beenden" (beendet WindowGrid ganz).
+Änderungen auf allen Seiten gelten erst nach "Speichern" unten rechts – beim Wechsel
+der Seite geht nichts verloren.
+
 - Spalten / Zeilen  : Feinheit des Rasters (1 bis 100)
 - Abstand           : Lücke zwischen den Fenstern und zum Bildschirmrand (px)
 - Bedienung         : Tasten für "Größe anpassen", "Verschieben" und "Zentrieren" frei zuweisen,
@@ -128,6 +157,11 @@ Einstellungen
 - Freie Felder      : Maßlinien zum Bildschirmrand ein-/ausblenden
 - Mit Windows starten (Eintrag unter HKCU\...\Run)
 - Windows-Andocklayouts: öffnet die Windows-Einstellung, um die Andocklayouts auszuschalten
+- Extras -> Einstellungen exportieren/importieren: schreibt die Einstellungen in eine Datei bzw. liest
+  sie wieder ein, z. B. für einen zweiten Rechner. Importierte Werte gelten erst
+  nach "Speichern".
+- Speichern lässt das Fenster offen und meldet kurz "Gespeichert". Wird das Fenster
+  mit ungespeicherten Änderungen über das X geschlossen, fragt WindowGrid nach.
 - Mit Administratorrechten: Autostart läuft dann über die Aufgabenplanung
   (Aufgabe "WindowGrid", "Mit höchsten Privilegien"). Windows fragt nur beim
   Einrichten einmal nach. Nach dem Speichern kann WindowGrid sofort mit
@@ -137,6 +171,8 @@ Einstellungen
 Die Einstellungen liegen in "%LOCALAPPDATA%\WindowGrid\WindowGrid.ini" (wie bei den
 anderen Programmen). Eine WindowGrid.ini früherer Versionen neben der EXE wird beim
 ersten Start automatisch dorthin übernommen.
+Fehler (z. B. beim Update oder beim Autostart) schreibt WindowGrid in
+"%LOCALAPPDATA%\WindowGrid\Fehler.log".
 
 Erstellen
 ---------
