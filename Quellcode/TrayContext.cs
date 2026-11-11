@@ -23,6 +23,7 @@ namespace WindowGrid
         private readonly GridEngine _engine;
         private readonly NotifyIcon _tray;
         private readonly ContextMenuStrip _menu;
+        private Point _menuAnchor; // Mausposition beim Öffnen des Tray-Menüs
         private readonly Icon _appIcon;
         private readonly Icon _trayIcon;
         private readonly Icon _trayIconPaused;
@@ -75,9 +76,15 @@ namespace WindowGrid
             _menu.Opening += delegate (object sender, System.ComponentModel.CancelEventArgs e)
             {
                 BuildMenu(); // jedes Mal frisch: Design, Akzentfarbe und Zustände aktuell
+                _menuAnchor = Cursor.Position;
                 e.Cancel = false;
             };
-            _menu.Opened += delegate { MenuHelper.RoundCorners(_menu); };
+            _menu.Opened += delegate
+            {
+                // bei mehreren Bildschirmen nicht auf den Nachbarbildschirm ragen (globale Vorgabe)
+                MenuHelper.KeepOnScreen(_menu, _menuAnchor);
+                MenuHelper.RoundCorners(_menu);
+            };
 
             _tray = new NotifyIcon();
             _tray.ContextMenuStrip = _menu;

@@ -61,6 +61,7 @@ namespace WindowGrid
         private bool _navOpen;       // ausgeklappt, obwohl nicht angepinnt (liegt dann über dem Inhalt)
         private int _page;
         private Timer _navTimer;
+        private Timer _navHover;     // nicht angepinnt: nach 400 ms Verweilen ausklappen
         private ContextMenuStrip _moreMenu;
         private ModernToolTip _tips;
         private ZonesEditor _zones;
@@ -368,6 +369,19 @@ namespace WindowGrid
             };
             _navTimer.Start();
 
+            // nicht angepinnt: Verweilt die Maus ca. 400 ms auf der eingeklappten Navigation, klappt sie aus (wie ☰, über
+            // dem Inhalt); kurzes Überfahren löst nichts aus. Einklappen übernimmt _navTimer. Referenz: Dock Pilot, Wake on LAN.
+            _navHover = new Timer();
+            _navHover.Interval = 400;
+            _navHover.Tick += delegate
+            {
+                _navHover.Stop();
+                if (_original.NavPinned || _navOpen || !Visible || !OverNav()) return;
+                _navOpen = true;
+                LayoutAll();
+            };
+            HookNavHover(_nav);
+
             LayoutAll();
 
             // Live-Vorschau
@@ -394,6 +408,15 @@ namespace WindowGrid
             b.Click += delegate { click(); };
             _nav.Controls.Add(b);
             return b;
+        }
+
+        private bool OverNav() { return _nav.RectangleToScreen(_nav.ClientRectangle).Contains(Cursor.Position); }
+
+        private void HookNavHover(Control c)
+        {
+            c.MouseEnter += delegate { if (!_original.NavPinned && !_navOpen && !_navHover.Enabled) _navHover.Start(); };
+            c.MouseLeave += delegate { if (!OverNav()) _navHover.Stop(); }; // Wechsel zwischen den Einträgen zählt nicht als Verlassen
+            foreach (Control child in c.Controls) HookNavHover(child);
         }
 
         /// <summary>Seite anzeigen: 0 Raster, 1 Bedienung, 2 Schnellzonen, 3 Darstellung, 4 Allgemein.</summary>
@@ -522,7 +545,7 @@ namespace WindowGrid
                 if (!_navMore.IsDisposed) _navMore.Selected = false;
                 CloseNav();
             };
-            m.Show(_navMore, new Point(_navMore.Width + S(4), _navMore.Height), ToolStripDropDownDirection.AboveRight);
+            MenuHelper.ShowOnScreen(m, _navMore, new Point(_navMore.Width + S(4), _navMore.Height), ToolStripDropDownDirection.AboveRight);
         }
 
         private GlyphMenuItem MoreItem(ContextMenuStrip menu, MenuTheme theme, string text, char glyph, MethodInvoker action)
@@ -1021,6 +1044,7 @@ namespace WindowGrid
                 Updater.AvailableChanged -= _onUpdateChanged;
                 if (_statusTimer != null) _statusTimer.Dispose();
                 if (_navTimer != null) _navTimer.Dispose();
+                if (_navHover != null) _navHover.Dispose();
                 if (_moreMenu != null) _moreMenu.Dispose();
                 if (_tips != null) _tips.Dispose();
                 if (_logo != null && _logo.Image != null) _logo.Image.Dispose();

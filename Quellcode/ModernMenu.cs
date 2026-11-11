@@ -493,6 +493,41 @@ namespace WindowGrid
 
         private static Bitmap _blank;
 
+        /// <summary>
+        /// Menü öffnen und dabei im Arbeitsbereich des Bildschirms halten, auf dem das Element liegt. Windows verschiebt
+        /// Menüs am Rand nur innerhalb des ganzen Desktops, sonst ragen sie auf den Nachbarbildschirm (globale Vorgabe,
+        /// Referenz Wake on LAN/Dock Pilot).
+        /// </summary>
+        public static void ShowOnScreen(ToolStripDropDown menu, Control owner, Point location, ToolStripDropDownDirection direction)
+        {
+            Size size = menu.GetPreferredSize(Size.Empty);
+            if (!menu.AutoSize || size.Width <= 0 || size.Height <= 0) size = menu.Size;
+            Rectangle ownerRect = owner.RectangleToScreen(owner.ClientRectangle);
+            Rectangle area = Screen.FromRectangle(ownerRect).WorkingArea;
+            Point p = owner.PointToScreen(location);
+            bool up = direction == ToolStripDropDownDirection.AboveRight || direction == ToolStripDropDownDirection.AboveLeft;
+            bool left = direction == ToolStripDropDownDirection.AboveLeft || direction == ToolStripDropDownDirection.BelowLeft || direction == ToolStripDropDownDirection.Left;
+            int x = left ? p.X - size.Width : p.X;
+            int y = up ? p.Y - size.Height : p.Y;
+            if (!up && y + size.Height > area.Bottom) y = (location.Y >= owner.Height ? ownerRect.Top : p.Y) - size.Height; // unten kein Platz
+            if (up && y < area.Top) y = p.Y;                                                                                 // oben kein Platz
+            if (x + size.Width > area.Right) x = area.Right - size.Width;
+            if (x < area.Left) x = area.Left;
+            if (y + size.Height > area.Bottom) y = area.Bottom - size.Height;
+            if (y < area.Top) y = area.Top;
+            menu.Show(owner, owner.PointToClient(new Point(x, y)), ToolStripDropDownDirection.BelowRight);
+        }
+
+        /// <summary>Offenes Menü (z. B. Tray-Menü) in den Arbeitsbereich des Bildschirms schieben, auf dem anchor liegt.</summary>
+        public static void KeepOnScreen(ToolStripDropDown menu, Point anchor)
+        {
+            Rectangle area = Screen.FromPoint(anchor).WorkingArea;
+            Rectangle b = menu.Bounds;
+            int x = Math.Max(area.Left, Math.Min(b.X, area.Right - b.Width));
+            int y = Math.Max(area.Top, Math.Min(b.Y, area.Bottom - b.Height));
+            if (x != b.X || y != b.Y) menu.Location = new Point(x, y);
+        }
+
         /// <summary>Durchsichtiges Bild als Platzhalter für die Breite der Symbolspalte.</summary>
         public static Image Blank(int width, int height)
         {

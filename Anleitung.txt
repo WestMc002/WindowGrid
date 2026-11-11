@@ -142,7 +142,8 @@ Einstellungen
 -------------
 Links die Navigation mit den Seiten Raster, Bedienung, Schnellzonen, Darstellung und
 Allgemein. Oben links klappt der Knopf mit den drei Strichen die Navigation ein oder
-aus, die Stecknadel pinnt sie an. Unten in der Navigation: "Extras" (Info, Anleitung,
+aus, die Stecknadel pinnt sie an. Nicht angepinnt klappt sie auch aus, wenn die
+Maus kurz auf ihr verweilt. Unten in der Navigation: "Extras" (Info, Anleitung,
 Fehlerprotokoll, Export/Import, Standardwerte) und "Beenden" (beendet WindowGrid ganz).
 Änderungen auf allen Seiten gelten erst nach "Speichern" unten rechts – beim Wechsel
 der Seite geht nichts verloren.
