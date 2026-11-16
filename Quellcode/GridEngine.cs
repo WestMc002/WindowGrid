@@ -8,6 +8,7 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
+using Microsoft.Win32;
 
 namespace WindowGrid
 {
@@ -85,6 +86,7 @@ namespace WindowGrid
 
         // Windows-Andocken (Aero Snap / Andocklayouts) während des Rasters abgeschaltet?
         private static bool _snapDisabled;
+        private Timer _snapGuard; // Wächter: Andocken nach dem Raster sicher wieder an
 
         // Grundraster des Monitors, auf dem das Raster gerade liegt (eigenes Raster je Monitor oder Spalten/Zeilen)
         private int _baseCols, _baseRows;
@@ -112,6 +114,17 @@ namespace WindowGrid
                 IntPtr.Zero, _winEventProc, 0, 0,
                 NativeMethods.WINEVENT_OUTOFCONTEXT | NativeMethods.WINEVENT_SKIPOWNPROCESS);
             UpdateHotkeys();
+
+            // Andocken wieder einschalten, falls es noch aus ist (z. B. nach einem abgebrochenen WindowGrid),
+            // und danach alle 3 Sekunden nachsehen, solange kein Raster sichtbar ist.
+            if (!Demo.Active)
+            {
+                RepairSnap();
+                _snapGuard = new Timer();
+                _snapGuard.Interval = 3000;
+                _snapGuard.Tick += delegate { if (!_dragging && _mode == Mode.None) RepairSnap(); };
+                _snapGuard.Start();
+            }
         }
 
         // ------------------------------------------------------------------ Ausnahmen
@@ -826,13 +839,50 @@ namespace WindowGrid
             catch { }
         }
 
-        /// <summary>Andocken wieder einschalten, falls WindowGrid es abgeschaltet hat.</summary>
+        /// <summary>
+        /// Andocken wieder einschalten, falls WindowGrid es abgeschaltet hat. Mit SPIF_SENDCHANGE, damit Explorer
+        /// die Änderung sicher mitbekommt (ohne SPIF_UPDATEINIFILE: die gespeicherte Einstellung bleibt unberührt).
+        /// </summary>
         public static void RestoreSnap()
         {
             if (!_snapDisabled) return;
-            try { NativeMethods.SystemParametersInfoSet(NativeMethods.SPI_SETWINARRANGING, 0, new IntPtr(1), 0); }
-            catch { }
             _snapDisabled = false;
+            if (!SnapWanted()) return; // inzwischen in Windows ausgeschaltet: so lassen
+            try { NativeMethods.SystemParametersInfoSet(NativeMethods.SPI_SETWINARRANGING, 0, new IntPtr(1), NativeMethods.SPIF_SENDCHANGE); }
+            catch { }
+        }
+
+        /// <summary>
+        /// Wächter: Ist Andocken gerade aus, in den Windows-Einstellungen aber an (und zeigt WindowGrid kein Raster),
+        /// wieder einschalten. Fängt Fälle ab, in denen das Ende des Ziehens nicht ankam oder WindowGrid
+        /// zuvor hart beendet wurde.
+        /// </summary>
+        public static void RepairSnap()
+        {
+            if (_snapDisabled) return;
+            try
+            {
+                int on;
+                if (!NativeMethods.SystemParametersInfoGet(NativeMethods.SPI_GETWINARRANGING, 0, out on, 0) || on != 0) return;
+                if (!SnapWanted()) return;
+                if (NativeMethods.SystemParametersInfoSet(NativeMethods.SPI_SETWINARRANGING, 0, new IntPtr(1), NativeMethods.SPIF_SENDCHANGE))
+                    Log.Write("Andocken", "War noch ausgeschaltet – wieder eingeschaltet.");
+            }
+            catch { }
+        }
+
+        /// <summary>Gespeicherte Windows-Einstellung "Fenster andocken" (HKCU\Control Panel\Desktop\WindowArrangementActive).</summary>
+        private static bool SnapWanted()
+        {
+            try
+            {
+                using (RegistryKey key = Registry.CurrentUser.OpenSubKey(@"Control Panel\Desktop"))
+                {
+                    object v = key != null ? key.GetValue("WindowArrangementActive") : null;
+                    return v == null || Convert.ToString(v).Trim() != "0";
+                }
+            }
+            catch { return true; }
         }
 
         private void ExitGridMode()
@@ -977,6 +1027,7 @@ namespace WindowGrid
             if (_winEventHook != IntPtr.Zero) { NativeMethods.UnhookWinEvent(_winEventHook); _winEventHook = IntPtr.Zero; }
             if (_mouseHook != IntPtr.Zero) { NativeMethods.UnhookWindowsHookEx(_mouseHook); _mouseHook = IntPtr.Zero; }
             if (_keyHook != IntPtr.Zero) { NativeMethods.UnhookWindowsHookEx(_keyHook); _keyHook = IntPtr.Zero; }
+            if (_snapGuard != null) { _snapGuard.Stop(); _snapGuard.Dispose(); _snapGuard = null; }
             RestoreSnap();
             if (_flashTimer != null) _flashTimer.Dispose();
             if (_hotkeys != null) { try { _hotkeys.Close(); } catch { } _hotkeys = null; }

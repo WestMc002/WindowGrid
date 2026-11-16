@@ -96,7 +96,9 @@ Damit sie sich nicht mit dem Raster überlagern, in den WindowGrid-Einstellungen
 Einstellungen -> System -> Multitasking. Dort den Haken bei "Andocklayouts anzeigen,
 wenn ich ein Fenster an den oberen Bildschirmrand ziehe" entfernen. Das wirkt sofort.
 Das Andocken an den Bildschirmrändern schaltet WindowGrid nur ab, solange das Raster
-sichtbar ist.
+sichtbar ist. Die gespeicherte Windows-Einstellung bleibt dabei unverändert. Ist das
+Andocken danach noch aus (z. B. weil WindowGrid vorher abgebrochen wurde), schaltet
+WindowGrid es nach wenigen Sekunden wieder ein – außer es ist in Windows ausgeschaltet.
 
 Weitere Tasten während das Raster sichtbar ist
 ----------------------------------------------
