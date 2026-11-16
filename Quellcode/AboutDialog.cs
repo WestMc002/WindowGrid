@@ -24,8 +24,12 @@ namespace WindowGrid
 
         /// <summary>Startet das Selbst-Update (vom Tray gesetzt; läuft erst nach dem Schließen des Info-Fensters).</summary>
         public static Action StartInstall;
+
+        /// <summary>"Automatisch aktualisieren" eingeschaltet bzw. Info-Fenster geschlossen (vom Tray gesetzt): Update versuchen.</summary>
+        public static Action AutoInstallChanged;
         private readonly float k;
         private readonly DialogButton _close;
+        private InfoCard _infoCard; // Karte mit den Eckdaten (wächst beim Aufklappen der "Details")
 
         // Farben wie in den anderen Programmen
         private readonly Color _back, _card, _border, _text, _muted, _versionText;
@@ -41,7 +45,11 @@ namespace WindowGrid
                     if (owner != null && owner.Visible) d.ShowDialog(owner);
                     else d.ShowDialog();
                 }
-                finally { _open = null; }
+                finally
+                {
+                    _open = null;
+                    if (AutoInstallChanged != null && !Demo.Active) AutoInstallChanged();
+                }
             }
         }
 
@@ -124,7 +132,8 @@ namespace WindowGrid
             Settings settings = Demo.Active || LiveSettings == null ? new Settings() : LiveSettings;
             InfoCard card = new InfoCard(k, _card, _border, _back);
             card.Location = new Point(S(24), y);
-            card.Size = new Size(W - S(48), S(18) * 2 + rowCount * S(26) + S(60) + S(32)); // + Zeilen Updates und Automatisch prüfen
+            card.Size = new Size(W - S(48), S(18) * 2 + rowCount * S(26) + S(49) + S(32) + S(32)); // + Updates, Automatisch prüfen/aktualisieren
+            _infoCard = card;
             ToolTip tip = new ModernToolTip();
             for (int i = 0; i < rowCount; i++)
             {
@@ -191,9 +200,28 @@ namespace WindowGrid
         private int S(float v) { return (int)Math.Round(v * k); }
 
         /// <summary>
-        /// Updates (Vorlage: Wake on LAN): Symbol und Stand, darunter grau die letzte Prüfung; rechts ein kleiner Knopf
-        /// ("Jetzt prüfen", bei neuer Version "Aktualisieren" bzw. "Release-Seite"), darunter der Schalter
-        /// "Automatisch prüfen". Das Ergebnis einer Prüfung von Hand erscheint nur hier.
+        /// Karte um d Pixel höher oder niedriger (aufgeklappte "Details"): alles darunter und das Fenster rücken mit.
+        /// Die feste Fenstergröße (MinimumSize = MaximumSize) vorher lösen und danach neu setzen.
+        /// </summary>
+        private void GrowCard(int d)
+        {
+            if (_infoCard == null || d == 0) return;
+            bool locked = MinimumSize == MaximumSize && MinimumSize != Size.Empty;
+            MinimumSize = Size.Empty;
+            MaximumSize = Size.Empty;
+            int bottom = _infoCard.Bottom;
+            foreach (Control c in Controls) if (c != _infoCard && c.Top >= bottom) c.Top += d;
+            _infoCard.Height += d;
+            ClientSize = new Size(ClientSize.Width, ClientSize.Height + d);
+            if (locked) { MinimumSize = Size; MaximumSize = Size; }
+        }
+
+        /// <summary>
+        /// Zeile "Updates" nach globaler Vorgabe (Referenz: Dock Pilot, Wake on LAN ab v1.64): Raster wie die Zeilen darüber,
+        /// Symbol und Überschrift, darunter eine kurze zweite Zeile (bei Fehlern mit aufklappbaren "Details"), Knopf rechts
+        /// neben beiden Zeilen; zwei Zeilenabstände tiefer "Automatisch prüfen", darunter "Automatisch aktualisieren".
+        /// uy = Beginn der Zeile.
+        /// Das Ergebnis einer Prüfung von Hand erscheint nur hier.
         /// </summary>
         private void AddUpdateRows(InfoCard card, int uy, Settings settings)
         {
@@ -202,18 +230,21 @@ namespace WindowGrid
             Color red = dark ? Color.FromArgb(255, 153, 164) : Color.FromArgb(196, 43, 28);
             int x0 = S(24) + S(118);           // Spalte der Werte
             int right = card.Width - S(24);    // rechter Rand der Werte
+            int tx = x0 + S(23);               // Überschrift dicht hinter dem Symbol
+            Font small = new Font("Segoe UI", 8.75f);
+            const TextFormatFlags flags = TextFormatFlags.NoPadding | TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix;
 
             Label name = new Label();
             name.Text = "Updates";
             name.ForeColor = _muted;
             name.BackColor = _card;
             name.TextAlign = ContentAlignment.MiddleLeft;
-            name.Bounds = new Rectangle(S(24), uy + S(9), S(110), S(22));
+            name.Bounds = new Rectangle(S(24), uy + S(2), S(110), S(22));
             card.Controls.Add(name);
 
             StatusGlyph glyph = new StatusGlyph(k);
             glyph.BackColor = _card;
-            glyph.Bounds = new Rectangle(x0, uy + S(9), S(20), S(22));
+            glyph.Bounds = new Rectangle(x0, uy + S(2), S(20), S(22));
             card.Controls.Add(glyph);
 
             Label title = new Label();
@@ -230,8 +261,38 @@ namespace WindowGrid
             detail.AutoEllipsis = true;
             detail.UseMnemonic = false;
             detail.TextAlign = ContentAlignment.TopLeft;
-            detail.Font = new Font("Segoe UI", 8.75f);
+            detail.Font = small;
             card.Controls.Add(detail);
+
+            // "Details": Wort in Akzentfarbe, klappt das Feld mit dem technischen Originaltext auf
+            Label more = new Label();
+            more.Text = "Details";
+            more.ForeColor = _versionText;
+            more.BackColor = _card;
+            more.UseMnemonic = false;
+            more.TextAlign = ContentAlignment.TopLeft;
+            more.Font = small;
+            more.Cursor = Cursors.Hand;
+            more.Visible = false;
+            card.Controls.Add(more);
+
+            // aufgeklapptes Feld (Fensterfarbe, Innenabstand 8/6), Text markier- und kopierbar
+            Panel box = new Panel();
+            box.BackColor = _back;
+            box.Visible = false;
+            box.Padding = new Padding(S(8), S(6), S(8), S(6));
+            TextBox boxText = new TextBox();
+            boxText.Multiline = true;
+            boxText.ReadOnly = true;
+            boxText.WordWrap = true;
+            boxText.BorderStyle = BorderStyle.None;
+            boxText.BackColor = _back;
+            boxText.ForeColor = _text;
+            boxText.Font = small;
+            boxText.Dock = DockStyle.Fill;
+            boxText.TabStop = false;
+            box.Controls.Add(boxText);
+            card.Controls.Add(box);
 
             DialogButton check = new DialogButton("Jetzt prüfen", MenuHelper.Refresh, false, k, this, 30);
             DialogButton install = new DialogButton("Aktualisieren", MenuHelper.Download, true, k, this, 30);
@@ -240,12 +301,117 @@ namespace WindowGrid
             tip.SetToolTip(install, "WindowGrid beenden, auf die neue Version aktualisieren und neu starten");
             foreach (DialogButton b in new DialogButton[] { check, install, page })
             {
-                // rechtsbündig mit dem Schalter darunter und auf Höhe der ersten Zeile,
-                // damit die zweite Zeile (letzte Prüfung) die volle Breite hat
-                b.Location = new Point(right - S(2) - b.Width, uy + S(20) - b.Height / 2);
+                // rechtsbündig mit dem Schalter darunter, Oberkante uy + 8, neben beiden Textzeilen
+                b.Location = new Point(right - S(2) - b.Width, uy + S(8));
                 card.Controls.Add(b);
-                b.BringToFront(); // vor der zweiten Zeile, die bis zum rechten Rand reicht – sonst ist der Knopf unten abgeschnitten
+                b.BringToFront();
             }
+
+            // "Automatisch prüfen": Text bündig mit den Werten darüber, Schalter rechts
+            ToggleSwitch auto = new ToggleSwitch();
+            auto.Size = new Size(S(44), S(22));
+            auto.BackColor = _card;
+            auto.Checked = settings.UpdateCheck;
+            auto.CheckedChanged += delegate
+            {
+                if (Demo.Active || LiveSettings == null) return;
+                settings.UpdateCheck = auto.Checked; // gilt sofort und wird gespeichert
+                settings.Save();
+            };
+            card.Controls.Add(auto);
+            Label autoText = new Label();
+            autoText.Text = "Automatisch prüfen";
+            autoText.ForeColor = _text;
+            autoText.BackColor = _card;
+            autoText.TextAlign = ContentAlignment.MiddleLeft;
+            autoText.AutoEllipsis = true;
+            autoText.Cursor = Cursors.Hand;
+            autoText.Click += delegate { auto.Checked = !auto.Checked; };
+            card.Controls.Add(autoText);
+
+            // "Automatisch aktualisieren": nur bedienbar, wenn "Automatisch prüfen" an ist
+            ToggleSwitch autoInstall = new ToggleSwitch();
+            autoInstall.Size = new Size(S(44), S(22));
+            autoInstall.BackColor = _card;
+            autoInstall.Checked = !Demo.Active && settings.AutoInstall;
+            card.Controls.Add(autoInstall);
+            Label installText = new Label();
+            installText.Text = "Automatisch aktualisieren";
+            installText.BackColor = _card;
+            installText.TextAlign = ContentAlignment.MiddleLeft;
+            installText.AutoEllipsis = true;
+            installText.Cursor = Cursors.Hand;
+            installText.Click += delegate { if (autoInstall.Enabled) autoInstall.Checked = !autoInstall.Checked; };
+            card.Controls.Add(installText);
+            string installTip = "Eine neue Version ohne Rückfrage installieren, sobald WindowGrid nicht beschäftigt ist. " +
+                "WindowGrid startet danach von selbst neu (im Infobereich, wenn das Fenster vorher zu war).";
+            tip.SetToolTip(autoInstall, installTip);
+            tip.SetToolTip(installText, installTip);
+            MethodInvoker syncInstall = delegate
+            {
+                autoInstall.Enabled = auto.Checked;
+                installText.ForeColor = auto.Checked ? _text : _muted;
+            };
+            syncInstall();
+            auto.CheckedChanged += delegate { syncInstall(); };
+            autoInstall.CheckedChanged += delegate
+            {
+                if (Demo.Active || LiveSettings == null) return;
+                settings.AutoInstall = autoInstall.Checked; // gilt sofort und wird gespeichert
+                settings.Save();
+            };
+
+            string moreText = "";
+            bool open = false;
+            int boxHeight = 0; // aufgeklappte Höhe (Feld + 8), um die Karte und Fenster gewachsen sind
+
+            MethodInvoker layout = delegate
+            {
+                DialogButton shown = install.Visible ? install : page.Visible ? page : check;
+                int limit = Math.Max(S(40), shown.Left - S(6) - tx); // Texte enden vor dem Knopf
+                title.Bounds = new Rectangle(tx, uy + S(2), limit, S(22));
+                int linkW = more.Visible ? TextRenderer.MeasureText(more.Text, small, Size.Empty, flags).Width + S(2) : 0;
+                // Label zeichnet mit kleinem Innenabstand: Breite = Text (NoPadding) + Reserve
+                int textW = detail.Text.Length == 0 ? 0 : TextRenderer.MeasureText(detail.Text, small, Size.Empty, flags).Width;
+                int room = (more.Visible ? limit - linkW - S(3) : limit) - S(8);
+                if (textW > room) textW = Math.Max(0, room); // zu lang: mit "…" kürzen, ganzer Text im Tooltip
+                detail.Bounds = new Rectangle(tx, uy + S(23), Math.Max(1, textW + S(8)), S(20));
+                // "Details" etwa ein Leerzeichen hinter dem Text, ohne Text bündig unter der Überschrift
+                int mx = detail.Text.Length == 0 ? tx : tx + textW + S(3);
+                more.Bounds = new Rectangle(mx, uy + S(23), Math.Max(1, linkW), S(20));
+                box.Bounds = new Rectangle(x0, uy + S(46), right - x0, Math.Max(0, boxHeight - S(8)));
+                int ay = uy + S(49) + boxHeight;
+                auto.Location = new Point(right - S(2) - auto.Width, ay + (S(32) - auto.Height) / 2);
+                autoText.Bounds = new Rectangle(x0, ay, auto.Left - S(8) - x0, S(32));
+                int iy = ay + S(32);
+                autoInstall.Location = new Point(right - S(2) - autoInstall.Width, iy + (S(32) - autoInstall.Height) / 2);
+                installText.Bounds = new Rectangle(x0, iy, autoInstall.Left - S(8) - x0, S(32));
+            };
+
+            Action<bool> setOpen = delegate (bool on)
+            {
+                int want = 0;
+                if (on && moreText.Length > 0)
+                {
+                    int w = Math.Max(S(40), right - x0 - S(16));
+                    int line = TextRenderer.MeasureText("Ag", small).Height;
+                    int h = TextRenderer.MeasureText(moreText, small, new Size(w, 0), TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix).Height;
+                    bool scroll = h > line * 6;
+                    h = Math.Min(h, line * 6); // höchstens sechs Zeilen, sonst Bildlauf im Feld
+                    boxText.ScrollBars = scroll ? ScrollBars.Vertical : ScrollBars.None;
+                    want = h + S(12) + S(8);
+                }
+                else on = false;
+                open = on;
+                boxText.Text = moreText;
+                more.Text = open ? "Weniger" : "Details";
+                box.Visible = open;
+                int d = want - boxHeight;
+                boxHeight = want;
+                GrowCard(d);
+                layout();
+            };
+            more.Click += delegate { setOpen(!open); };
 
             Action<UpdateStatus> show = delegate (UpdateStatus st)
             {
@@ -259,18 +425,18 @@ namespace WindowGrid
                 }
                 title.Text = st.Title;
                 title.ForeColor = st.Kind == UpdateKind.Available ? _versionText : st.Kind == UpdateKind.Checking ? _muted : _text;
+                tip.SetToolTip(title, st.Title);
                 detail.Text = st.Detail;
                 tip.SetToolTip(detail, st.Detail);
+                moreText = st.More ?? "";
+                more.Visible = moreText.Length > 0;
                 bool available = st.Kind == UpdateKind.Available;
                 bool canInstall = available && !Demo.Active && Updater.CanInstall();
                 install.Visible = canInstall;
                 page.Visible = available && !canInstall;
                 check.Visible = !available;
                 check.Enabled = st.Kind != UpdateKind.Checking;
-                DialogButton shown = install.Visible ? install : page.Visible ? page : check;
-                int tx = x0 + S(28);
-                title.Bounds = new Rectangle(tx, uy + S(9), Math.Max(S(40), shown.Left - S(12) - tx), S(22));
-                detail.Bounds = new Rectangle(tx, uy + S(33), Math.Max(S(40), right - tx), S(20));
+                setOpen(false); // neuer Stand: Feld schließen (auch ohne Detailtext)
             };
 
             check.Click += delegate
@@ -289,31 +455,6 @@ namespace WindowGrid
             };
             page.Click += delegate { Updater.OpenPage(); };
             show(Updater.Status(settings));
-
-            // Automatisch prüfen: Text bündig mit den Werten darüber, Schalter rechts
-            int ay = uy + S(60);
-            ToggleSwitch auto = new ToggleSwitch();
-            auto.Size = new Size(S(44), S(22));
-            auto.Location = new Point(right - S(2) - auto.Width, ay + (S(32) - auto.Height) / 2);
-            auto.BackColor = _card;
-            auto.Checked = settings.UpdateCheck;
-            auto.CheckedChanged += delegate
-            {
-                if (Demo.Active || LiveSettings == null) return;
-                settings.UpdateCheck = auto.Checked; // gilt sofort und wird gespeichert
-                settings.Save();
-            };
-            card.Controls.Add(auto);
-            Label autoText = new Label();
-            autoText.Text = "Automatisch prüfen";
-            autoText.ForeColor = _text;
-            autoText.BackColor = _card;
-            autoText.TextAlign = ContentAlignment.MiddleLeft;
-            autoText.AutoEllipsis = true;
-            autoText.Cursor = Cursors.Hand;
-            autoText.Bounds = new Rectangle(x0, ay, auto.Left - S(8) - x0, S(32));
-            autoText.Click += delegate { auto.Checked = !auto.Checked; };
-            card.Controls.Add(autoText);
         }
 
         internal Color BackColorUi { get { return _back; } }

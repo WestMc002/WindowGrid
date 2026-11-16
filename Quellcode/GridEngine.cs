@@ -35,6 +35,9 @@ namespace WindowGrid
         private IntPtr _keyHook = IntPtr.Zero;
 
         private bool _dragging;
+
+        /// <summary>Gerade wird ein Fenster gezogen (dann kein automatisches Update).</summary>
+        public bool Dragging { get { return _dragging; } }
         private IntPtr _dragHwnd = IntPtr.Zero;
         private Mode _mode = Mode.None;
         private GridGeometry _geo;

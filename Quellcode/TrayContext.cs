@@ -34,6 +34,7 @@ namespace WindowGrid
         private readonly Control _invoker;
         private SettingsForm _form;
         private readonly System.Windows.Forms.Timer _updateTimer;
+        private readonly System.Windows.Forms.Timer _autoRetry; // automatisch aktualisieren: beschäftigt → alle 5 Minuten erneut
         private bool _balloonIsUpdate;
         private string _notifiedVersion;
 
@@ -52,10 +53,11 @@ namespace WindowGrid
             return new TrayContext(settings, appIcon)._menu;
         }
 
-        public TrayContext() : this(false) { }
+        public TrayContext() : this(false, false) { }
 
         /// <param name="afterUpdate">Neustart durch das Update-Skript (--nach-update): Ergebnis anzeigen.</param>
-        public TrayContext(bool afterUpdate)
+        /// <param name="trayOnly">Nach dem Update nur im Infobereich (/tray); sonst wieder die Einstellungen öffnen.</param>
+        public TrayContext(bool afterUpdate, bool trayOnly)
         {
             _invoker = new Control();
             IntPtr h = _invoker.Handle;
@@ -121,8 +123,13 @@ namespace WindowGrid
                     _tray.ShowBalloonTip(8000, "Update fehlgeschlagen",
                         result.Replace("FEHLER", "").Trim() + " – die bisherige Version läuft weiter.", ToolTipIcon.Warning);
                 }
+                // Einstellungen waren vor dem Update offen: wieder öffnen
+                if (!trayOnly) _invoker.BeginInvoke((MethodInvoker)ShowSettings);
             }
             AboutDialog.LiveSettings = _settings;
+            // "Automatisch aktualisieren" eingeschaltet bzw. Info-Fenster geschlossen: sofort versuchen,
+            // wenn schon eine neue Version bekannt ist
+            AboutDialog.AutoInstallChanged = delegate { _invoker.BeginInvoke((MethodInvoker)TryAutoUpdate); };
             AboutDialog.StartInstall = delegate
             {
                 _invoker.BeginInvoke((MethodInvoker)delegate { Updater.InstallInteractive(VisibleForm, _invoker, null); });
@@ -134,16 +141,50 @@ namespace WindowGrid
                 if (_balloonIsUpdate) Updater.InstallInteractive(VisibleForm, _invoker, null);
             };
             _tray.BalloonTipClosed += delegate { _balloonIsUpdate = false; };
-            // still im Hintergrund: 20 Sekunden nach dem Start, danach alle 6 Stunden nachsehen,
-            // ob die Prüfung fällig ist (höchstens alle 20 Stunden, abschaltbar im Info-Fenster)
+            // still im Hintergrund (globale Vorgabe): etwa 15 s nach jedem Start ohne 20-Stunden-Sperre,
+            // danach alle 6 Stunden nachsehen, ob die Prüfung fällig ist (höchstens alle 20 Stunden).
+            // Abschaltbar im Info-Fenster ("Automatisch prüfen").
             _updateTimer = new System.Windows.Forms.Timer();
-            _updateTimer.Interval = 20000;
+            _updateTimer.Interval = 15000;
             _updateTimer.Tick += delegate
             {
+                bool atStart = _updateTimer.Interval != 6 * 60 * 60 * 1000;
                 _updateTimer.Interval = 6 * 60 * 60 * 1000;
-                if (Updater.Due(_settings)) Updater.CheckAsync(_settings, _invoker, false, null);
+                if (Demo.Active || !_settings.UpdateCheck) return;
+                if (atStart || Updater.Due(_settings))
+                    Updater.CheckAsync(_settings, _invoker, false, delegate { TryAutoUpdate(); });
             };
             _updateTimer.Start();
+            _autoRetry = new System.Windows.Forms.Timer();
+            _autoRetry.Interval = 5 * 60 * 1000;
+            _autoRetry.Tick += delegate { _autoRetry.Stop(); TryAutoUpdate(); };
+        }
+
+        /// <summary>
+        /// Automatisch aktualisieren (globale Vorgabe): neue Version ohne Rückfrage installieren, wenn der Schalter an ist,
+        /// das Release ein ZIP hat und WindowGrid nicht im Projektordner läuft. Beschäftigt (Fenster wird gezogen,
+        /// ungespeicherte Einstellungen, ein Dialog offen) → in 5 Minuten erneut versuchen.
+        /// </summary>
+        private void TryAutoUpdate()
+        {
+            if (Demo.Active || !_settings.UpdateCheck || !_settings.AutoInstall || !Updater.CanInstall()) return;
+            if (BusyForUpdate())
+            {
+                _autoRetry.Stop();
+                _autoRetry.Start();
+                return;
+            }
+            _autoRetry.Stop();
+            Updater.InstallSilently(_invoker, VisibleForm == null);
+        }
+
+        private bool BusyForUpdate()
+        {
+            if (_engine.Dragging) return true;
+            if (_form != null && !_form.IsDisposed && _form.HasChanges()) return true;
+            foreach (Form f in Application.OpenForms) if (f.Modal) return true; // Info-Fenster, Rückfragen …
+            if (_menu.Visible) return true;
+            return false;
         }
 
         private Form VisibleForm
@@ -402,6 +443,7 @@ namespace WindowGrid
         {
             if (_form != null && !_form.IsDisposed) _form.CloseWithoutAsking();
             if (_updateTimer != null) _updateTimer.Stop();
+            if (_autoRetry != null) _autoRetry.Stop();
             _tray.Visible = false;
             _showWait.Unregister(null);
             _engine.Dispose();

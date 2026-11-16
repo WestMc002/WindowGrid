@@ -711,7 +711,7 @@ namespace WindowGrid
         }
 
         /// <summary>Steht im Fenster etwas anderes als gespeichert ist?</summary>
-        private bool HasChanges()
+        internal bool HasChanges()
         {
             try
             {

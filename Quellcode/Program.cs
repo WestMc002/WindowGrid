@@ -64,7 +64,9 @@ namespace WindowGrid
                     MessageBox.Show("Unerwarteter Fehler:\n\n" + e.Exception.Message, "WindowGrid",
                         MessageBoxButtons.OK, MessageBoxIcon.Error);
                 };
-                Application.Run(new TrayContext(afterUpdate));
+                // /tray: nach dem Update nur im Infobereich starten (Fenster war vorher zu)
+                bool tray = Array.Exists(args, a => string.Equals(a, "/tray", StringComparison.OrdinalIgnoreCase));
+                Application.Run(new TrayContext(afterUpdate, tray));
                 GC.KeepAlive(mutex);
             }
             return 0;

@@ -68,7 +68,8 @@ namespace WindowGrid
         public bool Paused = false;
         public bool FirstRun = true;
         public bool NavPinned = true;   // Navigation im Einstellungsfenster angepinnt (ausgeklappt)
-        public bool UpdateCheck = true;           // beim Start auf GitHub nach neuen Versionen sehen (höchstens einmal täglich)
+        public bool UpdateCheck = true;           // kurz nach jedem Start (und alle 6 Stunden) auf GitHub nach neuen Versionen sehen
+        public bool AutoInstall = false;          // neue Version ohne Rückfrage installieren, sobald WindowGrid nicht beschäftigt ist
         public string LastUpdateCheck = "";       // Zeitpunkt der letzten erfolgreichen Prüfung (UTC, ISO 8601)
         public bool ZoneHotkeys = true;           // Strg+Win+Alt+1–9 setzt das aktive Fenster auf die Schnellzone
         public string Excluded = "";              // Programme ohne Raster: Prozessnamen ohne .exe, mit Semikolon getrennt
@@ -102,7 +103,7 @@ namespace WindowGrid
             for (int i = 0; i < o.Zones.Length; i++) Zones[i] = o.Zones[i].Clone();
             LastSelection = o.LastSelection;
             Paused = o.Paused; FirstRun = o.FirstRun;
-            UpdateCheck = o.UpdateCheck; LastUpdateCheck = o.LastUpdateCheck;
+            UpdateCheck = o.UpdateCheck; LastUpdateCheck = o.LastUpdateCheck; AutoInstall = o.AutoInstall;
             ZoneHotkeys = o.ZoneHotkeys;
             NavPinned = o.NavPinned;
             Excluded = o.Excluded ?? "";
@@ -283,6 +284,7 @@ namespace WindowGrid
                 s.FirstRun = GetBool(values, "ErsterStart", s.FirstRun);
                 s.NavPinned = GetBool(values, "NavigationAngepinnt", s.NavPinned);
                 s.UpdateCheck = GetBool(values, "UpdatesPruefen", s.UpdateCheck);
+                s.AutoInstall = GetBool(values, "AutomatischAktualisieren", s.AutoInstall);
                 string lastCheck;
                 if (values.TryGetValue("LetzteUpdatePruefung", out lastCheck)) s.LastUpdateCheck = lastCheck.Trim();
                 s.ZoneHotkeys = GetBool(values, "SchnellzonenTasten", s.ZoneHotkeys);
@@ -386,6 +388,7 @@ namespace WindowGrid
             sb.AppendLine("AlsAdministrator=" + B(RunAsAdmin));
             sb.AppendLine("; Beim Start auf GitHub nach einer neuen Version sehen, höchstens einmal täglich (1 = ja)");
             sb.AppendLine("UpdatesPruefen=" + B(UpdateCheck));
+            sb.AppendLine("AutomatischAktualisieren=" + B(AutoInstall));
             sb.AppendLine("LetzteUpdatePruefung=" + LastUpdateCheck);
             sb.AppendLine("; Ursprünglicher Windows-Wert aus einer früheren Version (wird beim Start zurückgesetzt, -1 = nichts zu tun)");
             sb.AppendLine("AndocklayoutsVorher=" + SnapBarOriginal);
