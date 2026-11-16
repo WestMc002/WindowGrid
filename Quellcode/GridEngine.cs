@@ -86,6 +86,8 @@ namespace WindowGrid
 
         // Windows-Andocken (Aero Snap / Andocklayouts) während des Rasters abgeschaltet?
         private static bool _snapDisabled;
+        private static bool _snapSavedOn; // gespeicherte Windows-Einstellung beim Abschalten (an?)
+        private static bool _repairLogged; // Wächter-Eingriff nur einmal je Vorfall protokollieren
         private Timer _snapGuard; // Wächter: Andocken nach dem Raster sicher wieder an
 
         // Grundraster des Monitors, auf dem das Raster gerade liegt (eigenes Raster je Monitor oder Spalten/Zeilen)
@@ -122,7 +124,18 @@ namespace WindowGrid
                 RepairSnap();
                 _snapGuard = new Timer();
                 _snapGuard.Interval = 3000;
-                _snapGuard.Tick += delegate { if (!_dragging && _mode == Mode.None) RepairSnap(); };
+                _snapGuard.Tick += delegate
+                {
+                    // Raster nicht (mehr) sichtbar und keine Maustaste gedrückt: Andocken muss an sein,
+                    // auch wenn das Ende des Ziehens nicht angekommen ist
+                    bool gridShown = _overlay.IsOverlayVisible || (Control.MouseButtons & MouseButtons.Left) != 0;
+                    if (_snapDisabled && !gridShown)
+                    {
+                        Log.Write("Andocken", "Raster weg, Andocken war noch aus – wieder eingeschaltet.");
+                        RestoreSnap();
+                    }
+                    if (!gridShown) RepairSnap();
+                };
                 _snapGuard.Start();
             }
         }
@@ -831,6 +844,7 @@ namespace WindowGrid
                 int on;
                 if (NativeMethods.SystemParametersInfoGet(NativeMethods.SPI_GETWINARRANGING, 0, out on, 0) && on != 0)
                 {
+                    _snapSavedOn = SnapWanted();
                     // Ohne SPIF_UPDATEINIFILE: gilt nur bis zur Rückstellung bzw. bis zur Abmeldung
                     if (NativeMethods.SystemParametersInfoSet(NativeMethods.SPI_SETWINARRANGING, 0, IntPtr.Zero, 0))
                         _snapDisabled = true;
@@ -847,8 +861,19 @@ namespace WindowGrid
         {
             if (!_snapDisabled) return;
             _snapDisabled = false;
-            if (!SnapWanted()) return; // inzwischen in Windows ausgeschaltet: so lassen
-            try { NativeMethods.SystemParametersInfoSet(NativeMethods.SPI_SETWINARRANGING, 0, new IntPtr(1), NativeMethods.SPIF_SENDCHANGE); }
+            try
+            {
+                uint flags = NativeMethods.SPIF_SENDCHANGE;
+                if (!SnapWanted())
+                {
+                    // Gespeicherte Einstellung ist jetzt "aus", war beim Abschalten aber "an": Windows hat den
+                    // vorübergehenden Zustand übernommen (nicht der Benutzer, das Raster war ja sichtbar) → zurückschreiben
+                    if (!_snapSavedOn) return;
+                    flags |= NativeMethods.SPIF_UPDATEINIFILE;
+                    Log.Write("Andocken", "Windows hatte „Fenster andocken“ auf Aus gespeichert – wieder auf Ein gesetzt.");
+                }
+                NativeMethods.SystemParametersInfoSet(NativeMethods.SPI_SETWINARRANGING, 1, IntPtr.Zero, flags);
+            }
             catch { }
         }
 
@@ -863,10 +888,18 @@ namespace WindowGrid
             try
             {
                 int on;
-                if (!NativeMethods.SystemParametersInfoGet(NativeMethods.SPI_GETWINARRANGING, 0, out on, 0) || on != 0) return;
+                if (!NativeMethods.SystemParametersInfoGet(NativeMethods.SPI_GETWINARRANGING, 0, out on, 0)) return;
+                if (on != 0) { _repairLogged = false; return; }
                 if (!SnapWanted()) return;
-                if (NativeMethods.SystemParametersInfoSet(NativeMethods.SPI_SETWINARRANGING, 0, new IntPtr(1), NativeMethods.SPIF_SENDCHANGE))
-                    Log.Write("Andocken", "War noch ausgeschaltet – wieder eingeschaltet.");
+                // Wert steht in uiParam (nicht pvParam) – mit pvParam blieb das Andocken aus
+                NativeMethods.SystemParametersInfoSet(NativeMethods.SPI_SETWINARRANGING, 1, IntPtr.Zero, NativeMethods.SPIF_SENDCHANGE);
+                int now;
+                bool ok = NativeMethods.SystemParametersInfoGet(NativeMethods.SPI_GETWINARRANGING, 0, out now, 0) && now != 0;
+                if (!_repairLogged)
+                {
+                    _repairLogged = true;
+                    Log.Write("Andocken", ok ? "War noch ausgeschaltet – wieder eingeschaltet." : "War noch ausgeschaltet – Einschalten fehlgeschlagen.");
+                }
             }
             catch { }
         }

@@ -233,6 +233,7 @@ namespace WindowGrid
         // Andocken (Aero Snap und Windows-11-Andocklayouts) ein-/ausschalten
         public const uint SPI_GETWINARRANGING = 0x0082;
         public const uint SPI_SETWINARRANGING = 0x0083;
+        public const uint SPIF_UPDATEINIFILE = 0x0001;
         public const uint SPIF_SENDCHANGE = 0x0002;
 
         [DllImport("user32.dll", EntryPoint = "SystemParametersInfo", SetLastError = true)]

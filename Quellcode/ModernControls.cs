@@ -956,7 +956,9 @@ namespace WindowGrid
                 Size s1 = TextRenderer.MeasureText(g, Name1, f1, Size.Empty, flags);
                 Size s2 = TextRenderer.MeasureText(g, Name2, f2, Size.Empty, flags);
                 int tw = Math.Max(s1.Width, s2.Width);
-                int gap = (int)(2 * k);
+                // Zeilen etwas enger, damit der Textblock nicht höher wirkt als das Logo
+                // (Schrifthöhe enthält oben/unten Leerraum für Ober- und Unterlängen)
+                int gap = -(int)Math.Round(3 * k);
                 int th = s1.Height + gap + s2.Height;
                 int top = (Height - th) / 2;
                 int tx = right - tw;
