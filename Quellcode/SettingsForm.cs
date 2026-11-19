@@ -959,6 +959,7 @@ namespace WindowGrid
             foreach (Control c in parent.Controls)
             {
                 bool onCard = parent is Card;
+                if (parent is UpdateBar) continue; // Knöpfe der Hinweisleiste bekommen die Farbe der Leiste (UpdateBar.OnPaint)
                 if (!(c is Card)) c.BackColor = onCard ? p.Card : p.Back;
                 if (c is Label)
                 {
@@ -1152,8 +1153,13 @@ namespace WindowGrid
             g.Clear(p.Back);
             g.SmoothingMode = SmoothingMode.AntiAlias;
             RectangleF r = new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f);
+            Color fill = Theme.Blend(p.Back, Theme.Accent, 0.14f);
+            // Knöpfe füllen ihre Ecken mit BackColor: auf die Farbe der Leiste setzen, sonst stehen dort
+            // helle bzw. dunkle Ecken in Fensterfarbe
+            foreach (ModernButton b in new[] { Install, Page, Later })
+                if (b.BackColor != fill) b.BackColor = fill;
             using (GraphicsPath path = Theme.RoundRect(r, 8f * _sc))
-            using (SolidBrush brush = new SolidBrush(Theme.Blend(p.Back, Theme.Accent, 0.14f)))
+            using (SolidBrush brush = new SolidBrush(fill))
             using (Pen pen = new Pen(Theme.Blend(p.Back, Theme.Accent, 0.45f)))
             {
                 g.FillPath(brush, path);
