@@ -473,7 +473,9 @@ namespace WindowGrid
             {
                 if (notepadFallback)
                 {
-                    try { System.Diagnostics.Process.Start("notepad.exe", "\"" + path + "\""); } catch { }
+                    // Systemprogramme nur über den festen Pfad starten, nie über den Suchpfad
+                    string notepad = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "notepad.exe");
+                    try { System.Diagnostics.Process.Start(notepad, "\"" + path + "\""); } catch { }
                 }
             }
         }

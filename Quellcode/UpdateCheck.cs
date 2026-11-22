@@ -430,7 +430,9 @@ namespace WindowGrid
         /// <summary>Kann das Update direkt installiert werden (ZIP vorhanden, nicht im Projektordner)?</summary>
         public static bool CanInstall()
         {
-            return Available != null && !string.IsNullOrEmpty(Available.ZipUrl) && !string.IsNullOrEmpty(Available.Sha256) && InstallBlocker() == null;
+            if (Available == null || string.IsNullOrEmpty(Available.ZipUrl) || string.IsNullOrEmpty(Available.Sha256)) return false;
+            QuietCleanup();
+            return InstallBlocker() == null;
         }
 
         /// <summary>
@@ -509,11 +511,11 @@ namespace WindowGrid
 
         private static bool CanWrite(string dir)
         {
+            // Zufallsname, CreateNew und DeleteOnClose: eine vorhandene Datei wird nie angefasst
             try
             {
-                string probe = Path.Combine(dir, "~update-test.tmp");
-                File.WriteAllText(probe, "");
-                File.Delete(probe);
+                string probe = Path.Combine(dir, "~update-" + Guid.NewGuid().ToString("N") + ".tmp");
+                using (new FileStream(probe, FileMode.CreateNew, FileAccess.Write, FileShare.None, 1, FileOptions.DeleteOnClose)) { }
                 return true;
             }
             catch { return false; }
@@ -605,7 +607,7 @@ namespace WindowGrid
             if (ScriptRunning()) throw new Exception(Running);
             PrepareTls();
             Directory.CreateDirectory(Folder);
-            CleanOldAttempts();
+            QuietCleanup();
             // eigener Arbeitsordner je Versuch: Download, Entpacken und Rückfallkopien kommen sich nie in die Quere
             // Name beginnt mit der Zielkennung: Die Sperrprüfung betrachtet nur Ordner dieses Installationsziels
             string attempt = Path.Combine(Folder, TargetId + "-" + Guid.NewGuid().ToString("N"));
@@ -712,8 +714,7 @@ namespace WindowGrid
 
         /// <summary>
         /// Arbeitsordner eines nicht abgeschlossenen Updates für dieses Installationsziel (null = keiner).
-        /// Ordner im Temp-Ordner, bei denen laut Journal nichts zurückzusetzen ist (alle Ziele gleich der Sicherung
-        /// bzw. nicht vorhanden), räumt WindowGrid dabei still auf.
+        /// Liest nur und löscht nichts (Aufräumen nur unter der Sperre, siehe QuietCleanup).
         /// </summary>
         private static string PendingRestore()
         {
@@ -724,29 +725,59 @@ namespace WindowGrid
                 string data = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
                 dirs.AddRange(Directory.GetDirectories(data, "WindowGrid-Update-" + TargetId + "-*"));
                 foreach (string dir in dirs)
-                {
-                    if (!File.Exists(Path.Combine(dir, PendingMarker))) continue;
-                    bool temp = dir.StartsWith(Folder + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
-                    if (temp && NothingToRestore(dir))
-                    {
-                        try
-                        {
-                            Directory.Delete(dir, true);
-                            Log.Write("Update", "Nicht abgeschlossenes Update aufgeräumt, es war nichts zurückzusetzen: " + dir);
-                            continue;
-                        }
-                        catch { }
-                    }
-                    return dir;
-                }
+                    if (File.Exists(Path.Combine(dir, PendingMarker))) return dir;
             }
             catch { }
             return null;
         }
 
         /// <summary>
-        /// Prüft das Wiederherstellungsjournal: true, wenn jede eingetragene Datei noch der Sicherung entspricht bzw. bei
-        /// „Neu“ nicht vorhanden ist (das Update hat dann nichts verändert). Übrig gebliebene Hilfsdateien werden entfernt.
+        /// Aufräumen unter der gemeinsamen Sperre (dieselbe Mutex wie Update- und Reparatur-Skript, nur kurz gehalten):
+        /// alte Versuche im Temp-Ordner und Temp-Arbeitsordner mit Merker, bei denen laut Journal nichts verändert ist.
+        /// Ist die Sperre belegt oder nicht zugänglich, passiert nichts. Arbeitsordner unter ProgramData räumt
+        /// WindowGrid nie still auf (es aktualisiert nie mit Administratorrechten, dort hilft die Wiederherstellung).
+        /// </summary>
+        public static void QuietCleanup()
+        {
+            Mutex m = null;
+            bool have = false;
+            try
+            {
+                m = new Mutex(false, LockName);
+                try { have = m.WaitOne(0); }
+                catch (AbandonedMutexException) { have = true; }
+                if (!have) return;
+                CleanOldAttempts();
+                if (!Directory.Exists(Folder)) return;
+                foreach (string dir in Directory.GetDirectories(Folder, TargetId + "-*"))
+                {
+                    if (!File.Exists(Path.Combine(dir, PendingMarker))) continue;
+                    if ((new DirectoryInfo(dir).Attributes & FileAttributes.ReparsePoint) != 0) continue;
+                    if (!NothingToRestore(dir)) continue;
+                    try
+                    {
+                        Directory.Delete(dir, true);
+                        Log.Write("Update", "Nicht abgeschlossenes Update aufgeräumt, es war nichts zurückzusetzen: " + dir);
+                    }
+                    catch { }
+                }
+            }
+            catch { }
+            finally
+            {
+                if (have) try { m.ReleaseMutex(); } catch { }
+                if (m != null) m.Dispose();
+            }
+        }
+
+        /// <summary>Größte Länge des Wiederherstellungsjournals, die gelesen wird.</summary>
+        private const int MaxJournal = 64 * 1024;
+
+        /// <summary>
+        /// Prüft das Wiederherstellungsjournal: true nur, wenn es vollständig ist („Bereit“ vor der ersten „Vorher“-Zeile,
+        /// jede Zeile im erwarteten Format, nur erlaubte Ziele) und jede eingetragene Datei noch ihrer Sicherung
+        /// entspricht (Prüfsumme aus dem Journal) bzw. bei „Neu“ nicht vorhanden ist. Fehlt das Journal oder ist es
+        /// unvollständig, gilt der Stand als unbekannt (false). Übrig gebliebene Hilfsdateien werden entfernt.
         /// </summary>
         private static bool NothingToRestore(string dir)
         {
@@ -755,24 +786,38 @@ namespace WindowGrid
                 string exe = Application.ExecutablePath;
                 string target = Path.GetDirectoryName(exe);
                 string journal = Path.Combine(dir, "Wiederherstellung.txt");
-                // Journal fehlt: Der Status wird vor dem Journal geschrieben, verändert wurde also noch nichts
-                if (!File.Exists(journal)) return true;
+                FileInfo fi = new FileInfo(journal);
+                if (!fi.Exists || fi.Length > MaxJournal) return false;
+                bool ready = false;
+                HashSet<string> numbers = new HashSet<string>();
+                HashSet<string> targets = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                List<string> helpers = new List<string>();
                 foreach (string line in File.ReadAllLines(journal, Encoding.UTF8))
                 {
-                    if (!line.StartsWith("Vorher ", StringComparison.Ordinal)) continue;
-                    System.Text.RegularExpressions.Match m = System.Text.RegularExpressions.Regex.Match(line,
-                        @"^Vorher (\d+): (Sicherung|Neu) \| Ziel: (.+?)(?: \| Sicherungsdatei: .+?)? \| Hilfsdatei: (.+)$");
-                    if (!m.Success) return false;
-                    string dst = m.Groups[3].Value, tmp = m.Groups[4].Value;
+                    if (line == "Bereit") { ready = true; continue; }
+                    if (!ready) continue; // Kopfzeilen
+                    if (line.Length == 0 || System.Text.RegularExpressions.Regex.IsMatch(line, @"^Ersetzt \d+$")) continue;
+                    System.Text.RegularExpressions.Match m = System.Text.RegularExpressions.Regex.Match(line, JournalLine);
+                    if (!m.Success || !numbers.Add(m.Groups[1].Value)) return false;
+                    string dst = m.Groups[3].Value, hash = m.Groups[4].Value, tmp = m.Groups[5].Value;
+                    if (!targets.Add(dst)) return false; // je Ziel höchstens ein Eintrag
                     if (!string.Equals(dst, exe, StringComparison.OrdinalIgnoreCase) &&
                         !string.Equals(dst, Path.Combine(target, ManualName), StringComparison.OrdinalIgnoreCase)) return false;
                     if (m.Groups[2].Value == "Sicherung")
                     {
                         string bak = Path.Combine(Path.Combine(dir, "Alt"), m.Groups[1].Value);
-                        if (!File.Exists(bak) || !File.Exists(dst) || Sha256Of(bak) != Sha256Of(dst)) return false;
+                        if (hash.Length != 64 || !File.Exists(bak) || !File.Exists(dst)) return false;
+                        if (!string.Equals(Sha256Of(bak), hash, StringComparison.OrdinalIgnoreCase)) return false;
+                        if (!string.Equals(Sha256Of(dst), hash, StringComparison.OrdinalIgnoreCase)) return false;
                     }
                     else if (File.Exists(dst)) return false;
-                    // Hilfsdatei nur im Programmordner und mit dem erwarteten Namen entfernen
+                    helpers.Add(tmp + "|" + dst);
+                }
+                if (!ready) return false;
+                // Hilfsdateien nur im Programmordner und mit dem erwarteten Namen entfernen
+                foreach (string h in helpers)
+                {
+                    string tmp = h.Substring(0, h.IndexOf('|')), dst = h.Substring(h.IndexOf('|') + 1);
                     if (string.Equals(Path.GetDirectoryName(tmp), target, StringComparison.OrdinalIgnoreCase) &&
                         Path.GetFileName(tmp).StartsWith("." + Path.GetFileName(dst) + ".update-", StringComparison.OrdinalIgnoreCase))
                         try { if (File.Exists(tmp)) File.Delete(tmp); } catch { }
@@ -781,6 +826,10 @@ namespace WindowGrid
             }
             catch { return false; }
         }
+
+        /// <summary>Format einer „Vorher“-Zeile im Journal (Gruppen: Nummer, Art, Ziel, SHA-256 der Sicherung, Hilfsdatei).</summary>
+        private const string JournalLine =
+            @"^Vorher (\d+): (Sicherung|Neu) \| Ziel: (.+?)(?: \| Sicherungsdatei: .+? \| SHA256: ([0-9A-Fa-f]{64}))? \| Hilfsdatei: (.+)$";
 
         /// <summary>
         /// Nicht abgeschlossenes Update: nachfragen und die vorherige Version wiederherstellen (WindowGrid wird dazu
@@ -791,6 +840,14 @@ namespace WindowGrid
             string dir = PendingRestore();
             if (dir == null) return false;
             Log.Write("Update", "Nicht abgeschlossenes Update gefunden: " + dir);
+            // nie im Projektordner und nie aus einer erhöhten Instanz (das Skript liefe sonst mit geerbten Adminrechten)
+            if (File.Exists(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Erstellen.bat"))) return false;
+            if (Autostart.IsElevated)
+            {
+                MessageBox.Show(owner, "WindowGrid läuft gerade mit Administratorrechten. Bitte WindowGrid normal starten und dann aktualisieren.",
+                    "Update", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return false;
+            }
             if (MessageBox.Show(owner,
                 PendingText + "\n\nWindowGrid stellt jetzt die vorherige Version wieder her und startet danach neu.\n\nJetzt wiederherstellen?",
                 "Update", MessageBoxButtons.YesNo, MessageBoxIcon.Information) != DialogResult.Yes) return false;
@@ -822,6 +879,7 @@ namespace WindowGrid
             Var(vars, "Exe", exe);
             Var(vars, "ManualName", ManualName);
             Var(vars, "TargetId", TargetId);
+            Var(vars, "LockName", LockName);
             Var(vars, "Log", LogFile);
             vars.Append("$Elevated = $").Append(elevated ? "true" : "false").Append("\n");
             vars.Append("$Tray = $").Append(tray ? "true" : "false").Append("\n");
@@ -928,6 +986,7 @@ namespace WindowGrid
                 MessageBox.Show(owner, Running, "Update", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
+            QuietCleanup();
             string blocker = InstallBlocker();
             if (blocker == PendingText)
             {
@@ -1014,7 +1073,14 @@ namespace WindowGrid
         /// <summary>Ergebnis des letzten Updates (nach dem Neustart mit --nach-update).</summary>
         public static string LastResult()
         {
-            try { return File.Exists(LogFile) ? File.ReadAllText(LogFile, Encoding.UTF8).Trim() : null; }
+            // höchstens 16 KB lesen; größer gilt als unbekanntes Ergebnis
+            try
+            {
+                FileInfo fi = new FileInfo(LogFile);
+                if (!fi.Exists) return null;
+                if (fi.Length > 16 * 1024) return "FEHLER Ergebnis des Updates unbekannt.";
+                return File.ReadAllText(LogFile, Encoding.UTF8).Trim();
+            }
             catch { return null; }
         }
 
@@ -1133,6 +1199,9 @@ $noRestart = $false
 $archive = $null
 $zipStream = $null
 try {
+  # tatsaechliches Token pruefen: erhoeht nur, wenn das Programm es so vorgesehen hat (sonst Sicherungen im Temp-Ordner)
+  $isAdmin = (New-Object System.Security.Principal.WindowsPrincipal([System.Security.Principal.WindowsIdentity]::GetCurrent())).IsInRole([System.Security.Principal.WindowsBuiltInRole]::Administrator)
+  if ($isAdmin -and -not $Elevated) { throw 'Das Update-Skript laeuft unerwartet mit Administratorrechten.' }
   # nur ein Update zur Zeit (Sperre bis zum Ende dieses Skripts)
   $lock = New-Object System.Threading.Mutex($false, $LockName)
   try { $haveLock = $lock.WaitOne(0) } catch [System.Threading.AbandonedMutexException] { $haveLock = $true }
@@ -1306,18 +1375,20 @@ try {
   # Rueckfallkopien im eigenen Arbeitsordner, nicht neben den Programmdateien
   $alt = Join-Path $Work 'Alt'
   New-Item -ItemType Directory -Path $alt -Force | Out-Null
-  # Status vor dem ersten Ueberschreiben dauerhaft anlegen: bricht der Austausch ab (auch hart beendet), bleibt der
-  # Arbeitsordner geschuetzt und neue Updates gesperrt. Laesst er sich nicht schreiben, wird nichts ausgetauscht.
-  $pending = Join-Path $Work 'Wiederherstellung-offen'
-  $alt | Out-File -LiteralPath $pending -Encoding utf8 -ErrorAction Stop
-  if (-not (Test-Path -LiteralPath $pending)) { throw 'Statusdatei konnte nicht angelegt werden.' }
-  # Wiederherstellungsjournal: vor jedem Austausch Zielpfad, Sicherungsdatei und ob das Ziel vorher existierte
+  # Reihenfolge: zuerst das Journal mit Kopf und ""Bereit"", dann der Status, dann der erste Austausch.
+  # Scheitert eines davon, wird nichts ausgetauscht.
+  # Wiederherstellungsjournal: vor jedem Austausch Zielpfad, Sicherungsdatei (mit SHA-256) und ob das Ziel vorher existierte
   $journal = Join-Path $Work 'Wiederherstellung.txt'
   @(('WindowGrid-Update ' + $Version + ' - Wiederherstellungsjournal'),
     'Jede Zeile ""Vorher"" gilt als moeglicherweise ueberschrieben, auch ohne folgende Zeile ""Ersetzt"" (Abbruch waehrend des Kopierens).',
     'Wiederherstellen fuer jede Zeile ""Vorher"": bei ""Sicherung"" die Sicherungsdatei auf das Ziel zurueckkopieren (sie ist vollstaendig), bei ""Neu"" die Zieldatei loeschen, falls vorhanden.',
     '""Ersetzt n"" bestaetigt nur, dass der Austausch dieser Datei abgeschlossen wurde. Eine uebrig gebliebene ""Hilfsdatei"" kann geloescht werden.',
-    '') | Set-Content -LiteralPath $journal -Encoding utf8 -ErrorAction Stop
+    '', 'Bereit') | Set-Content -LiteralPath $journal -Encoding utf8 -ErrorAction Stop
+  # Status dauerhaft anlegen: bricht der Austausch ab (auch hart beendet), bleibt der Arbeitsordner erhalten und
+  # neue Updates warten auf Aufraeumen bzw. Wiederherstellung
+  $pending = Join-Path $Work 'Wiederherstellung-offen'
+  $alt | Out-File -LiteralPath $pending -Encoding utf8 -ErrorAction Stop
+  if (-not (Test-Path -LiteralPath $pending)) { throw 'Statusdatei konnte nicht angelegt werden.' }
   $done = @()
   $i = 0
   try {
@@ -1330,7 +1401,8 @@ try {
         # erst vollstaendig unter Hilfsnamen kopieren, dann umbenennen: vorhandene Sicherungsdatei = vollstaendig
         Copy-Item -LiteralPath $p[1] -Destination ($bak + '.teil') -Force
         Move-Item -LiteralPath ($bak + '.teil') -Destination $bak -Force
-        $line = 'Vorher ' + $i + ': Sicherung | Ziel: ' + $p[1] + ' | Sicherungsdatei: ' + $bak + ' | Hilfsdatei: ' + $tmp
+        $bakHash = (Get-FileHash -LiteralPath $bak -Algorithm SHA256).Hash
+        $line = 'Vorher ' + $i + ': Sicherung | Ziel: ' + $p[1] + ' | Sicherungsdatei: ' + $bak + ' | SHA256: ' + $bakHash + ' | Hilfsdatei: ' + $tmp
       } else {
         $line = 'Vorher ' + $i + ': Neu | Ziel: ' + $p[1] + ' | Hilfsdatei: ' + $tmp
       }
@@ -1393,77 +1465,146 @@ if (-not $Elevated -and -not $noRestart) {
 ";
 
         // Wiederherstellung nach einem nicht abgeschlossenen Update. Davor setzt das Programm: $ProcessId, $Work, $Exe,
-        // $ManualName, $TargetId, $Log, $Elevated, $Tray. Liest das Journal, nimmt aber Ziele und Sicherungen nie
-        // ungeprüft daraus: Ziel nur EXE oder Anleitung, Sicherung immer <Work>\Alt\<Nummer>. Mit Adminrechten nur
-        // aus dem eigenen, geschützten Arbeitsordner unter ProgramData. Ergebnis: ZURUECK, FEHLER (nichts verändert)
-        // oder OFFEN (Wiederherstellung unvollständig, kein Neustart).
+        // $ManualName, $TargetId, $LockName, $Log, $Elevated, $Tray. Ablauf: Sperre erwerben, Merker erneut prüfen,
+        // das ganze Journal prüfen (höchstens 64 KB, „Bereit“ vor der ersten „Vorher“-Zeile, Format, eindeutige
+        // Nummern, nur EXE und Anleitung als Ziel, Sicherung immer <Work>\Alt\<Nummer> mit passender SHA-256), erst
+        // danach zurücksetzen. Mit Adminrechten nur aus dem eigenen, geschützten Arbeitsordner unter ProgramData
+        // (Assert-Protected für Ordner, Journal, Alt und jede Sicherung); Update.log dann nur dorthin, sonst exit 1.
+        // Ergebnis: ZURUECK, FEHLER (nichts verändert) oder OFFEN (Journal ungültig oder Wiederherstellung
+        // unvollständig: Merker bleibt, kein Neustart). Nie im Projektordner.
         private const string RepairScript = @"
 $ErrorActionPreference = 'Stop'
 $result = $null
 $noRestart = $false
+$changed = $false
+$workTrusted = $false
+$lock = $null
+$haveLock = $false
 $target = Split-Path $Exe -Parent
+# Besitzer und Schreibrechte: nur Administratoren, SYSTEM, TrustedInstaller; keine Verknuepfungen
+function Assert-Protected([string]$path) {
+  $it = Get-Item -LiteralPath $path -Force
+  if ($it.Attributes -band [System.IO.FileAttributes]::ReparsePoint) { throw ('Nicht geschuetzt (Verknuepfung): ' + $path) }
+  $trusted = @('S-1-5-32-544', 'S-1-5-18', 'S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464')
+  $acl = Get-Acl -LiteralPath $path
+  if ($trusted -notcontains $acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value) { throw ('Nicht geschuetzt (Besitzer): ' + $path) }
+  foreach ($r in $acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier])) {
+    if ($r.AccessControlType -ne [System.Security.AccessControl.AccessControlType]::Allow) { continue }
+    if ($r.PropagationFlags -band [System.Security.AccessControl.PropagationFlags]::InheritOnly) { continue }
+    if ($trusted -contains $r.IdentityReference.Value) { continue }
+    if (([int64]$r.FileSystemRights -band 0x500D0156) -ne 0) { throw ('Nicht geschuetzt (Schreibrecht fuer ' + $r.IdentityReference.Value + '): ' + $path) }
+  }
+}
+function Restore-File([string]$src, [string]$dst) {
+  $tmp = Join-Path (Split-Path $dst -Parent) ('.' + (Split-Path $dst -Leaf) + '.zurueck-' + [Guid]::NewGuid().ToString('N'))
+  try {
+    $in = [System.IO.File]::Open($src, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read)
+    try {
+      $out = [System.IO.File]::Open($tmp, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
+      try { $in.CopyTo($out); $out.Flush($true) } finally { $out.Dispose() }
+      if ((Get-Item -LiteralPath $tmp).Length -ne $in.Length) { throw ('Ruecksicherung von ' + $dst + ' unvollstaendig.') }
+    } finally { $in.Dispose() }
+    if (Test-Path -LiteralPath $dst) { [System.IO.File]::Replace($tmp, $dst, [NullString]::Value) }
+    else { [System.IO.File]::Move($tmp, $dst) }
+  } catch {
+    Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+    throw
+  }
+}
 try {
+  $isAdmin = (New-Object System.Security.Principal.WindowsPrincipal([System.Security.Principal.WindowsIdentity]::GetCurrent())).IsInRole([System.Security.Principal.WindowsBuiltInRole]::Administrator)
+  if ($isAdmin -and -not $Elevated) { throw 'Das Reparatur-Skript laeuft unerwartet mit Administratorrechten.' }
+  if (Test-Path -LiteralPath (Join-Path $target 'Erstellen.bat')) { throw 'Im Projektordner wird nichts zurueckgesetzt.' }
   $deadline = (Get-Date).AddSeconds(60)
   while ((Get-Process -Id $ProcessId -ErrorAction SilentlyContinue) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 250 }
   if (Get-Process -Id $ProcessId -ErrorAction SilentlyContinue) { throw 'WindowGrid wurde nicht beendet.' }
   $item = Get-Item -LiteralPath $Work -Force
   if ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) { throw 'Unerwarteter Arbeitsordner.' }
+  $altDir = Join-Path $Work 'Alt'
+  $journal = Join-Path $Work 'Wiederherstellung.txt'
   if ($Elevated) {
-    $admins = New-Object System.Security.Principal.SecurityIdentifier('S-1-5-32-544')
-    $system = New-Object System.Security.Principal.SecurityIdentifier('S-1-5-18')
     $root = [Environment]::GetFolderPath('CommonApplicationData')
     if ((Split-Path $Work -Parent) -ne $root -or (Split-Path $Work -Leaf) -notlike ('WindowGrid-Update-' + $TargetId + '-*')) { throw 'Unerwarteter Arbeitsordner.' }
-    $o = (Get-Acl -LiteralPath $Work).GetOwner([System.Security.Principal.SecurityIdentifier])
-    if (-not ($o -eq $admins -or $o -eq $system)) { throw 'Der Arbeitsordner ist nicht geschuetzt.' }
+    Assert-Protected $Work
+    if (Test-Path -LiteralPath $journal) { Assert-Protected $journal }
+    if (Test-Path -LiteralPath $altDir) { Assert-Protected $altDir }
+    $workTrusted = $true
   }
-  function Restore-File([string]$src, [string]$dst) {
-    $tmp = Join-Path (Split-Path $dst -Parent) ('.' + (Split-Path $dst -Leaf) + '.zurueck-' + [Guid]::NewGuid().ToString('N'))
-    try {
-      $in = [System.IO.File]::Open($src, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read)
-      try {
-        $out = [System.IO.File]::Open($tmp, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
-        try { $in.CopyTo($out); $out.Flush($true) } finally { $out.Dispose() }
-        if ((Get-Item -LiteralPath $tmp).Length -ne $in.Length) { throw ('Ruecksicherung von ' + $dst + ' unvollstaendig.') }
-      } finally { $in.Dispose() }
-      if (Test-Path -LiteralPath $dst) { [System.IO.File]::Replace($tmp, $dst, [NullString]::Value) }
-      else { [System.IO.File]::Move($tmp, $dst) }
-    } catch {
-      Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
-      throw
-    }
-  }
-  $allowed = @($Exe, (Join-Path $target $ManualName))
-  $journal = Join-Path $Work 'Wiederherstellung.txt'
-  $lines = @()
-  if (Test-Path -LiteralPath $journal) { $lines = [System.IO.File]::ReadAllLines($journal) }
-  $failed = @()
-  foreach ($line in $lines) {
-    if (-not $line.StartsWith('Vorher ')) { continue }
-    if ($line -notmatch '^Vorher (\d+): (Sicherung|Neu) \| Ziel: (.+?)(?: \| Sicherungsdatei: .+?)? \| Hilfsdatei: (.+)$') { throw 'Das Journal ist nicht lesbar.' }
-    $n = $Matches[1]; $kind = $Matches[2]; $dst = $Matches[3]; $tmp = $Matches[4]
-    if ($allowed -notcontains $dst) { throw 'Unerwarteter Eintrag im Journal.' }
-    try {
-      if ($kind -eq 'Sicherung') {
-        $bak = Join-Path (Join-Path $Work 'Alt') $n
+  # dieselbe Sperre wie das Update-Skript; unter der Sperre erneut pruefen, ob der Merker noch steht
+  $lock = New-Object System.Threading.Mutex($false, $LockName)
+  try { $haveLock = $lock.WaitOne(60000) } catch [System.Threading.AbandonedMutexException] { $haveLock = $true }
+  if (-not $haveLock) { throw 'Ein Update laeuft gerade.' }
+  $pending = Join-Path $Work 'Wiederherstellung-offen'
+  if (-not (Test-Path -LiteralPath $pending)) {
+    $result = 'ZURUECK Es war nichts mehr wiederherzustellen.'
+  } else {
+    # ab hier gilt jeder Abbruch als OFFEN: Merker bleibt, kein Neustart
+    $noRestart = $true
+    # 1. das ganze Journal pruefen, bevor irgendetwas veraendert wird
+    if (-not (Test-Path -LiteralPath $journal -PathType Leaf)) { throw 'Das Journal fehlt.' }
+    if ((Get-Item -LiteralPath $journal).Length -gt 65536) { throw 'Das Journal ist zu gross.' }
+    $allowed = @($Exe, (Join-Path $target $ManualName))
+    $ready = $false
+    $seen = @{}
+    $targets = @{}
+    $entries = @()
+    foreach ($line in [System.IO.File]::ReadAllLines($journal)) {
+      if ($line -eq 'Bereit') { $ready = $true; continue }
+      if (-not $ready) { continue }
+      if ($line -eq '' -or $line -match '^Ersetzt \d+$') { continue }
+      if ($line -match '^Vorher (\d+): Sicherung \| Ziel: (.+?) \| Sicherungsdatei: .+? \| SHA256: ([0-9A-Fa-f]{64}) \| Hilfsdatei: (.+)$') {
+        $e = @($Matches[1], 'Sicherung', $Matches[2], $Matches[3], $Matches[4])
+      } elseif ($line -match '^Vorher (\d+): Neu \| Ziel: (.+?) \| Hilfsdatei: (.+)$') {
+        $e = @($Matches[1], 'Neu', $Matches[2], '', $Matches[3])
+      } else { throw 'Das Journal ist nicht lesbar.' }
+      if ($seen.ContainsKey($e[0])) { throw 'Eine Nummer steht doppelt im Journal.' }
+      $seen[$e[0]] = $true
+      if ($allowed -notcontains $e[2]) { throw 'Unerwarteter Eintrag im Journal.' }
+      # je Ziel hoechstens ein Eintrag (sonst widerspruechlich, z. B. erst zurueckkopieren, dann loeschen)
+      if ($targets.ContainsKey($e[2].ToUpperInvariant())) { throw 'Ein Ziel steht doppelt im Journal.' }
+      $targets[$e[2].ToUpperInvariant()] = $true
+      if ($e[1] -eq 'Sicherung') {
+        $bak = Join-Path $altDir $e[0]
         if (-not (Test-Path -LiteralPath $bak -PathType Leaf)) { throw ('Sicherung fehlt: ' + $bak) }
-        $same = (Test-Path -LiteralPath $dst) -and ((Get-FileHash -LiteralPath $dst -Algorithm SHA256).Hash -eq (Get-FileHash -LiteralPath $bak -Algorithm SHA256).Hash)
-        if (-not $same) { Restore-File $bak $dst }
-      } elseif (Test-Path -LiteralPath $dst) {
-        Remove-Item -LiteralPath $dst -Force
+        if ($Elevated) { Assert-Protected $bak }
+        if ((Get-FileHash -LiteralPath $bak -Algorithm SHA256).Hash -ne $e[3].ToUpperInvariant()) { throw ('Sicherung veraendert: ' + $bak) }
       }
-      if ((Split-Path $tmp -Parent) -eq $target -and (Split-Path $tmp -Leaf) -like ('.' + (Split-Path $dst -Leaf) + '.update-*')) {
-        Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
-      }
-    } catch { $failed += ($dst + ': ' + $_.Exception.Message) }
+      $entries += ,$e
+    }
+    if (-not $ready) { throw 'Das Journal ist unvollstaendig.' }
+    # 2. zuruecksetzen (jede Datei einzeln, Fehler sammeln)
+    $failed = @()
+    foreach ($e in $entries) {
+      $dst = $e[2]
+      try {
+        if ($e[1] -eq 'Sicherung') {
+          $bak = Join-Path $altDir $e[0]
+          $same = (Test-Path -LiteralPath $dst) -and ((Get-FileHash -LiteralPath $dst -Algorithm SHA256).Hash -eq $e[3].ToUpperInvariant())
+          if (-not $same) { $changed = $true; Restore-File $bak $dst }
+        } elseif (Test-Path -LiteralPath $dst) {
+          $changed = $true
+          Remove-Item -LiteralPath $dst -Force
+        }
+        $tmp = $e[4]
+        if ((Split-Path $tmp -Parent) -eq $target -and (Split-Path $tmp -Leaf) -like ('.' + (Split-Path $dst -Leaf) + '.update-*')) {
+          Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+        }
+      } catch { $failed += ($dst + ': ' + $_.Exception.Message) }
+    }
+    if ($failed.Count -gt 0) { throw ('Wiederherstellung unvollstaendig (' + ($failed -join '; ') + ').') }
+    Remove-Item -LiteralPath $pending -Force
+    $noRestart = $false
+    $result = 'ZURUECK Die vorherige Version wurde wiederhergestellt.'
   }
-  if ($failed.Count -gt 0) { $noRestart = $true; throw ('Wiederherstellung unvollstaendig (' + ($failed -join '; ') + ').') }
-  Remove-Item -LiteralPath (Join-Path $Work 'Wiederherstellung-offen') -Force
-  $result = 'ZURUECK Die vorherige Version wurde wiederhergestellt.'
 } catch {
-  if ($noRestart) { $result = 'OFFEN ' + $_.Exception.Message } else { $result = 'FEHLER ' + $_.Exception.Message }
+  if ($noRestart -or $changed) { $noRestart = $true; $result = 'OFFEN ' + $_.Exception.Message } else { $result = 'FEHLER ' + $_.Exception.Message }
+} finally {
+  if ($haveLock) { try { $lock.ReleaseMutex() } catch {} }
+  if ($lock) { $lock.Dispose() }
 }
 if ($Elevated) {
-  # Ergebnis in den geschuetzten Arbeitsordner; den Neustart macht der nicht erhoehte Neustarthelfer
+  # Ergebnis nur in den geprueften, geschuetzten Arbeitsordner; sonst ohne Ergebnis enden (Neustarthelfer: unbekannt)
+  if (-not $workTrusted) { exit 1 }
   try { $result | Out-File -LiteralPath (Join-Path $Work 'Update.log') -Encoding utf8 } catch {}
 } else {
   try { $result | Out-File -LiteralPath $Log -Encoding utf8 } catch { $noRestart = $true }
@@ -1494,7 +1635,8 @@ if (-not $finished) {
 }
 Start-Sleep -Milliseconds 300
 $text = $null
-if (Test-Path -LiteralPath $workLog) { $text = Get-Content -LiteralPath $workLog -Raw -Encoding UTF8 }
+# hoechstens 16 KB lesen; groesser gilt als unbekanntes Ergebnis
+if ((Test-Path -LiteralPath $workLog) -and (Get-Item -LiteralPath $workLog).Length -le 16384) { $text = Get-Content -LiteralPath $workLog -Raw -Encoding UTF8 }
 if ($text) { $text = $text.Trim() }
 if ($Attempt) { Remove-Item -LiteralPath $Attempt -Recurse -Force }
 # Neustart nur bei eindeutigem Abschluss: installiert (OK) oder nichts veraendert bzw. vollstaendig zurueckgesetzt (FEHLER)

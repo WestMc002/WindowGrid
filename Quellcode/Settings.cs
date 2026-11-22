@@ -223,6 +223,8 @@ namespace WindowGrid
         {
             try
             {
+                // Datei von außen: erst die Größe prüfen (eine WindowGrid.ini hat nur wenige KB)
+                if (new FileInfo(path).Length > 1024 * 1024) return null;
                 string text = File.ReadAllText(path, Encoding.UTF8);
                 if (text.IndexOf("[Raster]", StringComparison.OrdinalIgnoreCase) < 0 ||
                     text.IndexOf("Spalten", StringComparison.OrdinalIgnoreCase) < 0) return null;
