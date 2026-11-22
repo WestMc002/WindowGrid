@@ -180,6 +180,23 @@ namespace WindowGrid
         [DllImport("user32.dll")]
         public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
 
+        // Erkennen, ob ein Fenster zu einem Programm mit Administratorrechten gehört
+        public const uint PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
+        public const uint TOKEN_QUERY = 0x0008;
+        public const int TokenElevation = 20;
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        public static extern IntPtr OpenProcess(uint access, bool inherit, uint pid);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        public static extern bool CloseHandle(IntPtr handle);
+
+        [DllImport("advapi32.dll", SetLastError = true)]
+        public static extern bool OpenProcessToken(IntPtr process, uint access, out IntPtr token);
+
+        [DllImport("advapi32.dll", SetLastError = true)]
+        public static extern bool GetTokenInformation(IntPtr token, int infoClass, out int info, int length, out int returned);
+
         [DllImport("user32.dll")]
         [return: MarshalAs(UnmanagedType.Bool)]
         public static extern bool GetCursorPos(out POINT lpPoint);

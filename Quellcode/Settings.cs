@@ -61,7 +61,7 @@ namespace WindowGrid
         public int MoveKey = 0x11;     // Strg (links oder rechts)
         public bool CenterEnabled = true;
         public int CenterKey = 0x43;   // C
-        public bool RunAsAdmin = false;
+        public bool KeepOldTask = false;   // alte Aufgabe "WindowGrid" in der Aufgabenplanung behalten (nicht mehr fragen)
         public int SnapBarOriginal = -1;          // ursprünglicher Windows-Wert EnableSnapBar (-1 = nicht geändert)
         public QuickZone[] Zones = QuickZone.Defaults();
         public RectangleF LastSelection = RectangleF.Empty; // in % des Arbeitsbereichs
@@ -97,7 +97,7 @@ namespace WindowGrid
             ResizeEnabled = o.ResizeEnabled; ResizeKey = o.ResizeKey;
             MoveEnabled = o.MoveEnabled; MoveKey = o.MoveKey;
             CenterEnabled = o.CenterEnabled; CenterKey = o.CenterKey;
-            RunAsAdmin = o.RunAsAdmin;
+            KeepOldTask = o.KeepOldTask;
             SnapBarOriginal = o.SnapBarOriginal;
             Zones = new QuickZone[o.Zones.Length];
             for (int i = 0; i < o.Zones.Length; i++) Zones[i] = o.Zones[i].Clone();
@@ -267,7 +267,7 @@ namespace WindowGrid
                 s.MoveKey = GetInt(values, "TasteVerschieben", s.MoveKey, 7, 254);
                 s.CenterEnabled = GetBool(values, "ZentrierenAktiv", s.CenterEnabled);
                 s.CenterKey = GetInt(values, "TasteZentrieren", s.CenterKey, 7, 254);
-                s.RunAsAdmin = GetBool(values, "AlsAdministrator", s.RunAsAdmin);
+                s.KeepOldTask = GetBool(values, "AlteAufgabeBehalten", s.KeepOldTask);
                 s.SnapBarOriginal = GetInt(values, "AndocklayoutsVorher", s.SnapBarOriginal, -1, 1);
                 for (int i = 0; i < s.Zones.Length; i++)
                 {
@@ -385,7 +385,7 @@ namespace WindowGrid
             sb.AppendLine("Animation=" + B(Animate));
             sb.AppendLine("[Allgemein]");
             sb.AppendLine("Pausiert=" + B(Paused));
-            sb.AppendLine("AlsAdministrator=" + B(RunAsAdmin));
+            sb.AppendLine("AlteAufgabeBehalten=" + B(KeepOldTask));
             sb.AppendLine("; Beim Start auf GitHub nach einer neuen Version sehen, höchstens einmal täglich (1 = ja)");
             sb.AppendLine("UpdatesPruefen=" + B(UpdateCheck));
             sb.AppendLine("AutomatischAktualisieren=" + B(AutoInstall));

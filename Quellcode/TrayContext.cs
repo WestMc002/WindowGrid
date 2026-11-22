@@ -72,6 +72,8 @@ namespace WindowGrid
             _engine.Start();
             SnapBar.Cleanup(_settings); // Änderung einer früheren Version einmalig zurücksetzen
             Autostart.UpdateMovedPath(); // Programmordner verschoben: Autostart auf den neuen Pfad umstellen
+            if (!Demo.Active && !_settings.KeepOldTask) CheckOldTask();
+            _engine.ElevatedWindowDragged += OnElevatedWindowDragged;
 
             _menu = new ContextMenuStrip();
             BuildMenu();
@@ -176,6 +178,103 @@ namespace WindowGrid
             }
             _autoRetry.Stop();
             Updater.InstallSilently(_invoker, VisibleForm == null);
+        }
+
+        /// <summary>
+        /// Alte Aufgabe "WindowGrid" (Autostart mit höchsten Rechten aus früheren Versionen) im Hintergrund suchen und
+        /// das Entfernen anbieten; danach den normalen Autostart setzen. "Nein" merkt sich WindowGrid (AlteAufgabeBehalten).
+        /// </summary>
+        private void CheckOldTask()
+        {
+            ThreadPool.QueueUserWorkItem(delegate
+            {
+                OldTask task = Autostart.QueryOldTask();
+                if (task == null) return; // keine alte Aufgabe
+                if (task.Error != null)
+                {
+                    // Lesefehler gesondert melden (nicht als "keine Aufgabe" werten); beim nächsten Start erneut versuchen
+                    Log.Write("Alte Aufgabe prüfen", "Aufgabenplanung nicht lesbar: " + task.Error);
+                    return;
+                }
+                try { _invoker.BeginInvoke((MethodInvoker)delegate { AskOldTask(task); }); } catch { }
+            });
+        }
+
+        private bool _adminAsked; // Rückfrage "mit Adminrechten neu starten" nur einmal je Programmstart
+        private string _adminWindow;
+
+        /// <summary>
+        /// Ein Fenster eines Programms mit Administratorrechten wurde gezogen: nach dem Loslassen einmal fragen,
+        /// ob WindowGrid mit Administratorrechten neu starten soll (gilt bis zum nächsten Beenden).
+        /// </summary>
+        private void OnElevatedWindowDragged(string name)
+        {
+            if (_adminAsked) return;
+            _adminAsked = true;
+            _adminWindow = name;
+            System.Windows.Forms.Timer wait = new System.Windows.Forms.Timer();
+            wait.Interval = 300;
+            wait.Tick += delegate
+            {
+                if (_engine.Dragging || (Control.MouseButtons & MouseButtons.Left) != 0) return; // erst nach dem Loslassen
+                wait.Stop();
+                wait.Dispose();
+                AskRestartAsAdmin();
+            };
+            wait.Start();
+        }
+
+        private void AskRestartAsAdmin()
+        {
+            string who = string.IsNullOrEmpty(_adminWindow) ? "Dieses Fenster gehört" : "Das Fenster von „" + _adminWindow + "“ gehört";
+            DialogResult r = MessageBox.Show(
+                who + " zu einem Programm, das mit Administratorrechten läuft. Solche Fenster kann WindowGrid nur " +
+                "anordnen, wenn es selbst mit Administratorrechten läuft.\n\n" +
+                "Das gilt nur bis zum nächsten Beenden von WindowGrid; beim nächsten Windows-Start läuft es wieder normal.\n\n" +
+                "WindowGrid jetzt mit Administratorrechten neu starten?",
+                "WindowGrid", MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2);
+            if (r != DialogResult.Yes) return;
+            if (_form != null && !_form.IsDisposed && _form.HasChanges())
+            {
+                MessageBox.Show("Bitte zuerst die Einstellungen speichern oder verwerfen.", "WindowGrid",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                _adminAsked = false; // beim nächsten Admin-Fenster erneut fragen
+                return;
+            }
+            if (Autostart.RestartAsAdmin()) ExitApp();
+        }
+
+        private void AskOldTask(OldTask task)
+        {
+            bool own = Autostart.IsOwnExe(task);
+            string cmds = task.Commands.Count > 0 ? string.Join("\n", task.Commands.ToArray()) : "(keine Aktion)";
+            string text =
+                "In der Aufgabenplanung gibt es noch die Aufgabe „WindowGrid“ aus einer früheren Version" +
+                (task.Highest ? " (startet mit Administratorrechten)" : "") + ":\n\n" + cmds +
+                (task.User.Length > 0 ? "\nBenutzer: " + task.User : "") +
+                (own ? "" : "\n\nDie Aufgabe startet nicht nur dieses WindowGrid – bitte genau prüfen.") +
+                "\n\nWindowGrid startet nicht mehr mit Administratorrechten, der Autostart läuft jetzt ohne Aufgabe. " +
+                "Windows fragt zum Entfernen einmal nach Administratorrechten.\n\nAufgabe jetzt entfernen?";
+            DialogResult r = MessageBox.Show(text, "WindowGrid", MessageBoxButtons.YesNo, MessageBoxIcon.Question,
+                own ? MessageBoxDefaultButton.Button1 : MessageBoxDefaultButton.Button2);
+            if (r == DialogResult.Yes)
+            {
+                if (Autostart.RemoveOldTask(task))
+                {
+                    if (!Autostart.Set(true))
+                        MessageBox.Show("Die Aufgabe ist entfernt, aber der Autostart konnte nicht eingerichtet werden.",
+                            "WindowGrid", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
+                else
+                    MessageBox.Show("Die Aufgabe wurde nicht entfernt (Nachfrage abgebrochen oder Aufgabe inzwischen verändert). " +
+                        "WindowGrid fragt beim nächsten Start erneut.",
+                        "WindowGrid", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+            else
+            {
+                _settings.KeepOldTask = true; // nicht mehr fragen
+                try { _settings.Save(); } catch { }
+            }
         }
 
         private bool BusyForUpdate()
@@ -313,7 +412,7 @@ namespace WindowGrid
             bool autoOn = Demo.Active || Autostart.IsEnabled;
             GlyphMenuItem auto = Item("Mit Windows starten", MenuHelper.Startup, delegate
             {
-                if (!Autostart.Set(!autoOn, _settings.RunAsAdmin))
+                if (!Autostart.Set(!autoOn))
                     MessageBox.Show("Der Autostart konnte nicht geändert werden.", "WindowGrid", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             });
             MakeToggle(auto, autoOn);
@@ -388,16 +487,6 @@ namespace WindowGrid
                 {
                     UpdateTray();
                     _engine.UpdateHotkeys(); // Strg+Win+Alt+1–9 an- oder abmelden
-                    SettingsForm f = sender as SettingsForm;
-                    if (f != null && f.RestartElevatedRequested)
-                    {
-                        // Erst die neue Instanz (mit UAC) starten, dann diese beenden
-                        _invoker.BeginInvoke((MethodInvoker)delegate
-                        {
-                            if (Autostart.RestartElevated()) ExitApp();
-                            else f.RestartElevatedRequested = false;
-                        });
-                    }
                 };
                 _form.ExitRequested += delegate { ExitApp(); };
                 _form.FormClosed += delegate

@@ -39,8 +39,8 @@ The program interface is in German.
 - **All keys freely assignable**
 - Works on **multiple monitors** and with **per-monitor DPI scaling**
 - **Tray icon** with a Windows 11 style menu, light/dark mode and Windows accent color
-- **Autostart**, optionally **with administrator rights** (via Task Scheduler) to arrange windows of elevated programs
-- **Updates:** checks GitHub for a new version shortly after every start and updates itself with one click or, optionally, automatically when idle (download verified by SHA-256) – settings are kept
+- **Autostart** without administrator rights; when you drag a window of an elevated program, WindowGrid offers to restart once with administrator rights
+- **Updates:** checks GitHub for a new version shortly after every start and updates itself with one click or, optionally, automatically when idle (updates are signed and only installed with a valid signature) – settings are kept
 - **Export/import** of the settings, e.g. for a second PC
 - **No installation:** extract and start – settings are stored in `%LOCALAPPDATA%\WindowGrid\WindowGrid.ini`
 
@@ -85,8 +85,8 @@ Fenster beim Ziehen per Raster anordnen – ein moderner Nachbau der bekannten W
 - **Alle Tasten frei belegbar**
 - Funktioniert mit **mehreren Monitoren** und **unterschiedlicher Skalierung je Monitor**
 - **Tray-Symbol** mit Menü im Windows-11-Stil, Hell/Dunkel und Windows-Akzentfarbe
-- **Autostart**, wahlweise **mit Administratorrechten** (über die Aufgabenplanung), um auch Fenster von Programmen mit Adminrechten anzuordnen
-- **Updates:** sieht kurz nach jedem Start auf GitHub nach einer neuen Version und aktualisiert sich auf Klick oder auf Wunsch automatisch im Leerlauf (Download per SHA-256 geprüft) – die Einstellungen bleiben erhalten
+- **Autostart** ohne Administratorrechte; zieht man ein Fenster eines Programms mit Adminrechten, bietet WindowGrid einmal an, mit Adminrechten neu zu starten
+- **Updates:** sieht kurz nach jedem Start auf GitHub nach einer neuen Version und aktualisiert sich auf Klick oder auf Wunsch automatisch im Leerlauf (Updates sind signiert und werden nur mit gültiger Signatur installiert) – die Einstellungen bleiben erhalten
 - **Export/Import** der Einstellungen, z. B. für einen zweiten Rechner
 - **Ohne Installation:** entpacken und starten – die Einstellungen liegen in `%LOCALAPPDATA%\WindowGrid\WindowGrid.ini`
 
@@ -150,6 +150,7 @@ Tipp für Windows 11: die Andocklayouts am oberen Bildschirmrand ausschalten (Ei
 | `Quellcode` | C# source code and manifest · C#-Quellcode und Manifest |
 | `Resources` | embedded resources (icon, logo) · eingebettete Ressourcen (Icon, Logo) |
 | `Screenshots` | images for this page · Bilder für diese Seite |
+| `Release` | signed release package (ZIP and manifest) · signiertes Release-Paket (ZIP und Manifest) |
 | `Erstellen.bat` | build script · Build-Skript |
 | `Anleitung.txt` | manual (German) · Anleitung (Deutsch) |
 

@@ -142,6 +142,40 @@ namespace WindowGrid
 
         // ------------------------------------------------------------------ Ausnahmen
 
+        /// <summary>
+        /// Ein Fenster eines Programms mit Administratorrechten wird gezogen, WindowGrid selbst läuft ohne
+        /// (Argument: Programmname). Windows lässt WindowGrid solche Fenster dann nicht anordnen.
+        /// </summary>
+        public event Action<string> ElevatedWindowDragged;
+
+        /// <summary>
+        /// Läuft das Programm des Fensters nachweislich mit Administratorrechten (Token-Elevation)? Lässt sich das
+        /// Token nicht lesen, gilt das als unbekannt (false) – dann wird kein Neustart angeboten.
+        /// </summary>
+        private static bool IsElevatedWindow(IntPtr hwnd, out string name)
+        {
+            name = "";
+            uint pid;
+            NativeMethods.GetWindowThreadProcessId(hwnd, out pid);
+            if (pid == 0) return false;
+            try { using (System.Diagnostics.Process p = System.Diagnostics.Process.GetProcessById((int)pid)) name = p.ProcessName; }
+            catch { }
+            IntPtr proc = NativeMethods.OpenProcess(NativeMethods.PROCESS_QUERY_LIMITED_INFORMATION, false, pid);
+            if (proc == IntPtr.Zero) return false;
+            try
+            {
+                IntPtr token;
+                if (!NativeMethods.OpenProcessToken(proc, NativeMethods.TOKEN_QUERY, out token)) return false; // unbekannt
+                try
+                {
+                    int elevated, len;
+                    return NativeMethods.GetTokenInformation(token, NativeMethods.TokenElevation, out elevated, 4, out len) && elevated != 0;
+                }
+                finally { NativeMethods.CloseHandle(token); }
+            }
+            finally { NativeMethods.CloseHandle(proc); }
+        }
+
         /// <summary>Gehört das Fenster zu einem Programm aus der Ausnahmeliste?</summary>
         private bool IsExcluded(IntPtr hwnd)
         {
@@ -282,6 +316,12 @@ namespace WindowGrid
                 IntPtr root = NativeMethods.GetAncestor(hwnd, NativeMethods.GA_ROOT);
                 if (IsExcluded(root != IntPtr.Zero ? root : hwnd)) return; // Programm aus der Ausnahmeliste
                 _dragHwnd = root != IntPtr.Zero ? root : hwnd;
+                if (ElevatedWindowDragged != null && !Demo.Active && !Autostart.IsElevated)
+                {
+                    string name;
+                    try { if (IsElevatedWindow(_dragHwnd, out name)) ElevatedWindowDragged(name); }
+                    catch { }
+                }
                 _dragging = true;
                 _mode = Mode.None;
                 _target = Rectangle.Empty;

@@ -1,8 +1,16 @@
-# WindowGrid - automatische Bereitstellung als ZIP (WindowGrid.exe + Anleitung.txt)
+# WindowGrid - Release aus dem signierten Release-Paket
+# Das Paket entsteht auf dem PC des Herausgebers (Erstellen.bat: ZIP mit WindowGrid.exe und
+# Anleitung.txt, dazu ein mit dem privaten Schluessel signiertes Manifest) und liegt im Ordner
+# Release. Der Workflow baut nichts selbst: Er prueft, dass ZIP und Manifest zur Version
+# passen (Name, Version, SHA-256 - die Signatur prueft erst WindowGrid, der Schluessel ist nicht
+# auf GitHub), und haengt beide an das Release.
 # Ausloeser: Aenderung dieser Datei auf main oder per Hand ueber "Run workflow"
 # (Eingabe der Versionsnummer). Ohne Eingabe gilt die Version aus dem neuesten
 # Commit "WindowGrid <Version> - Aenderungen".
-# Gibt es das Release zur Version schon, wird nichts neu gebaut, nur der Text aufgefrischt.
+# Gibt es das Release zur Version schon, wird nur der Text aufgefrischt.
+# Vorabversion: steht im Titel des Versions-Commits "Vorabversion", wird das Release als
+# Vorabversion (Pre-release) angelegt. Per Hand: Eingabe "vorab" = ja/nein, auto = wie im Commit.
+# Vorabversionen liefert /releases/latest nicht aus - die Update-Pruefung bietet sie nicht an.
 
 name: Release
 
@@ -13,8 +21,14 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version (z. B. 1.28.2026.1101)'
+        description: 'Version (z. B. 1.61.2026.1122)'
         required: false
+      vorab:
+        description: 'Vorabversion (auto = wie im Commit-Titel)'
+        required: false
+        default: 'auto'
+        type: choice
+        options: [auto, ja, nein]
 
 permissions:
   contents: write
@@ -41,6 +55,18 @@ jobs:
           }
           if($ver -notmatch '^\d+\.\d+\.\d+\.\d+$') { throw "keine gueltige Version gefunden: $ver" }
           "ver=$ver" >> $env:GITHUB_OUTPUT
+          # Vorabversion? Eingabe ja/nein hat Vorrang, sonst Titel des Versions-Commits
+          $vorab = '${{ github.event.inputs.vorab }}'
+          if(-not $vorab) { $vorab = 'auto' }
+          $pre = 0
+          if($vorab -eq 'ja') { $pre = 1 }
+          elseif($vorab -eq 'auto') {
+            $subj = git log --format=%s -F --grep="$ver" -n 1
+            if($subj -match 'Vorabversion') { $pre = 1 }
+          }
+          "pre=$pre" >> $env:GITHUB_OUTPUT
+          "vorab=$vorab" >> $env:GITHUB_OUTPUT
+          Write-Host "Version $ver, Vorabversion: $pre"
           gh release view "v$ver" *> $null
           if($LASTEXITCODE -eq 0) { "exists=1" >> $env:GITHUB_OUTPUT; Write-Host "Release v$ver existiert bereits - nur Text auffrischen" }
           else { "exists=0" >> $env:GITHUB_OUTPUT }
@@ -58,6 +84,10 @@ jobs:
             $punkte = @(git log -1 --format=%B $sha | Where-Object { $_ -match '^\s*- ' } | ForEach-Object { $_.Trim() })
           }
           $zeilen = New-Object System.Collections.Generic.List[string]
+          if('${{ steps.ver.outputs.pre }}' -eq '1') {
+            $zeilen.Add('> **Vorabversion** zum Testen. Die automatische Update-Prüfung bietet Vorabversionen nicht an.')
+            $zeilen.Add('')
+          }
           if($punkte.Count -gt 0) {
             $zeilen.Add('## Änderungen'); $zeilen.Add('')
             foreach($p in $punkte) { $zeilen.Add($p) }
@@ -70,44 +100,52 @@ jobs:
           $zeilen.Add('- Erste Schritte: ein Fenster an der Titelleiste ziehen und dabei die Leertaste drücken – das Raster erscheint.')
           $zeilen.Add('- Update: WindowGrid sieht selbst auf GitHub nach neuen Versionen und aktualisiert sich auf Klick (Tray-Menü, Hinweis im Infobereich oder Info-Fenster). Von Hand: WindowGrid beenden und die vorhandene `WindowGrid.exe` ersetzen.')
           $zeilen.Add('- Voraussetzungen: Windows 10 oder 11 mit .NET Framework 4.x (in Windows enthalten).')
+          $zeilen.Add('- Signatur: `WindowGrid-<Version>.manifest` ist die signierte Prüfsumme des ZIP. WindowGrid installiert Updates nur, wenn diese Signatur gültig ist.')
           $zeilen.Add('- Ausführliche Beschreibung in `Anleitung.txt` im ZIP.')
           [IO.File]::WriteAllText("$PWD\notes.md", ($zeilen -join "`n"), (New-Object System.Text.UTF8Encoding($false)))
           Get-Content notes.md -Encoding utf8
 
-      - name: Kompilieren
+      - name: Release-Paket pruefen
         if: steps.ver.outputs.exists == '0'
         shell: pwsh
         run: |
           $ver = '${{ steps.ver.outputs.ver }}'
-          @(
-            "[assembly: System.Reflection.AssemblyVersion(`"$ver`")]"
-            "[assembly: System.Reflection.AssemblyFileVersion(`"$ver`")]"
-            "[assembly: System.Reflection.AssemblyInformationalVersion(`"$ver`")]"
-            "namespace WindowGrid { public static partial class AppInfo { public const string Version = `"$ver`"; } }"
-          ) | Set-Content Quellcode\VersionInfo.cs -Encoding utf8
-          New-Item -ItemType Directory -Force Bin | Out-Null
-          $csc = "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
-          & $csc /nologo /target:winexe /optimize+ /codepage:65001 /out:Bin\WindowGrid.exe `
-            "/win32icon:Resources\WindowGrid.ico" `
-            "/resource:Resources\WindowGrid.ico,WindowGrid.ico" `
-            "/resource:Resources\GS-Logo.png,GS-Logo.png" `
-            /r:System.dll /r:System.Core.dll /r:System.Drawing.dll /r:System.Windows.Forms.dll `
-            "/win32manifest:Quellcode\app.manifest" Quellcode\*.cs
-          if($LASTEXITCODE -ne 0) { throw 'Kompilieren fehlgeschlagen' }
-          (Get-Item Bin\WindowGrid.exe).VersionInfo.FileVersion
+          $zip = "Release\WindowGrid-$ver.zip"
+          $man = "Release\WindowGrid-$ver.manifest"
+          if(-not (Test-Path -LiteralPath $zip)) { throw "Im Ordner Release fehlt $zip" }
+          if(-not (Test-Path -LiteralPath $man)) { throw "Im Ordner Release fehlt $man" }
+          $bytes = [IO.File]::ReadAllBytes($man)
+          if([Array]::IndexOf($bytes, [byte]13) -ge 0) { throw 'Das Manifest enthaelt CR (Zeilenende muss LF sein, sonst passt die Signatur nicht)' }
+          $werte = @{}
+          foreach($z in ([Text.Encoding]::UTF8.GetString($bytes) -split "`n")) { if($z -match '^([A-Za-z0-9]+)=(.*)$') { $werte[$Matches[1]] = $Matches[2] } }
+          if($werte['Programm'] -cne 'WindowGrid') { throw "Manifest: Programm ist '$($werte['Programm'])'" }
+          if($werte['Version'] -cne $ver) { throw "Manifest: Version ist '$($werte['Version'])', erwartet $ver" }
+          if($werte['Datei'] -cne "WindowGrid-$ver.zip") { throw "Manifest: Datei ist '$($werte['Datei'])'" }
+          $hash = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($werte['SHA256'] -cne $hash) { throw "Manifest: SHA256 passt nicht zum ZIP ($hash)" }
+          if(-not $werte['Signatur']) { throw 'Manifest: Signatur fehlt' }
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $z = [IO.Compression.ZipFile]::OpenRead((Resolve-Path -LiteralPath $zip).Path)
+          try { $namen = @($z.Entries | ForEach-Object { $_.FullName }) } finally { $z.Dispose() }
+          if($namen -notcontains 'WindowGrid.exe') { throw 'Im ZIP fehlt WindowGrid.exe' }
+          Write-Host "Release-Paket in Ordnung: $($namen -join ', ') - SHA256 $hash, Schluessel $($werte['Schluessel'])"
 
       - name: Release anlegen
         if: steps.ver.outputs.exists == '0'
         shell: pwsh
         run: |
           $ver = '${{ steps.ver.outputs.ver }}'
-          $zip = "WindowGrid-$ver.zip"
-          Compress-Archive -Path Bin\WindowGrid.exe, Anleitung.txt -DestinationPath $zip -Force
-          gh release create "v$ver" $zip --title "WindowGrid $ver" --notes-file notes.md --target $env:GITHUB_SHA
+          $ghArgs = @("v$ver", "Release\WindowGrid-$ver.zip", "Release\WindowGrid-$ver.manifest", '--title', "WindowGrid $ver", '--notes-file', 'notes.md', '--target', $env:GITHUB_SHA)
+          if('${{ steps.ver.outputs.pre }}' -eq '1') { $ghArgs += '--prerelease' }
+          gh release create @ghArgs
 
       - name: Release-Text auffrischen
         if: steps.ver.outputs.exists == '1'
         shell: pwsh
         run: |
           $ver = '${{ steps.ver.outputs.ver }}'
-          gh release edit "v$ver" --notes-file notes.md
+          $ghArgs = @("v$ver", '--notes-file', 'notes.md')
+          # Vorabversion nur umstellen, wenn ausdrücklich gewählt (ja/nein)
+          if('${{ steps.ver.outputs.vorab }}' -eq 'ja') { $ghArgs += '--prerelease=true' }
+          if('${{ steps.ver.outputs.vorab }}' -eq 'nein') { $ghArgs += '--prerelease=false'; $ghArgs += '--latest' }
+          gh release edit @ghArgs

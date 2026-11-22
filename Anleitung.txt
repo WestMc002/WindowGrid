@@ -120,9 +120,15 @@ Gibt es eine, erscheinen
     "Release-Seite" und "Später".
 "Jetzt aktualisieren" lädt das ZIP von GitHub, beendet WindowGrid, ersetzt
 WindowGrid.exe und Anleitung.txt und startet WindowGrid neu. Die Einstellungen
-(WindowGrid.ini) bleiben erhalten. Vor dem Ersetzen vergleicht WindowGrid die
-Prüfsumme (SHA-256) des Downloads mit der Angabe von GitHub. Liegt WindowGrid in einem Ordner ohne
-Schreibrechte (z. B. unter Programme), fragt Windows einmal nach Administratorrechten.
+(WindowGrid.ini) bleiben erhalten. Updates sind signiert: Zu jedem Release gehört
+eine signierte Prüfsumme (WindowGrid-<Version>.manifest). WindowGrid installiert nur,
+wenn die Signatur vom Herausgeber stammt und die Prüfsumme (SHA-256) des Downloads
+passt; sonst steht im Info-Fenster z. B. "Nicht signiert." und es öffnet sich nur
+die Release-Seite. Es wird nur ein Update zur Zeit ausgeführt, und übernommen werden
+nur WindowGrid.exe und Anleitung.txt; bei einem Fehler bleibt die bisherige Version.
+Liegt WindowGrid in einem Ordner ohne Schreibrechte (z. B. unter Programme), fragt
+Windows einmal nach Administratorrechten; danach startet WindowGrid trotzdem mit
+normalen Rechten neu.
 Im Projektordner (mit Erstellen.bat) wird nicht automatisch ersetzt – dort öffnet
 sich stattdessen die Release-Seite.
 Im Fenster "Info über WindowGrid" stehen unter "Updates" der Stand (aktuell,
@@ -175,11 +181,10 @@ der Seite geht nichts verloren.
   nach "Speichern".
 - Speichern lässt das Fenster offen und meldet kurz "Gespeichert". Wird das Fenster
   mit ungespeicherten Änderungen über das X geschlossen, fragt WindowGrid nach.
-- Mit Administratorrechten: Autostart läuft dann über die Aufgabenplanung
-  (Aufgabe "WindowGrid", "Mit höchsten Privilegien"). Windows fragt nur beim
-  Einrichten einmal nach. Nach dem Speichern kann WindowGrid sofort mit
-  Adminrechten neu gestartet werden. Im Info-Fenster steht unter "Rechte",
-  ob WindowGrid gerade als Administrator läuft.
+- Der Autostart läuft immer ohne Administratorrechte (Eintrag unter
+  HKCU\...\Run). Gibt es aus einer früheren Version noch die Aufgabe "WindowGrid"
+  in der Aufgabenplanung, bietet WindowGrid beim Start an, sie zu entfernen.
+  Im Info-Fenster steht unter "Rechte", ob WindowGrid gerade als Administrator läuft.
 
 Die Einstellungen liegen in "%LOCALAPPDATA%\WindowGrid\WindowGrid.ini" (wie bei den
 anderen Programmen). Eine WindowGrid.ini früherer Versionen neben der EXE wird beim
@@ -224,8 +229,10 @@ Erstellen.log            Compiler-Meldungen des letzten Builds
 
 Hinweise
 --------
-- Fenster von Programmen, die als Administrator laufen, kann WindowGrid nur
-  anordnen, wenn WindowGrid selbst als Administrator läuft
-  (Einstellungen -> "Mit Administratorrechten").
+- Fenster von Programmen, die als Administrator laufen (z. B. Task-Manager), kann
+  WindowGrid nur anordnen, wenn es selbst mit Administratorrechten läuft. Zieht man
+  ein solches Fenster, fragt WindowGrid einmal, ob es mit Administratorrechten neu
+  starten soll. Das gilt nur bis zum nächsten Beenden; beim nächsten Windows-Start
+  läuft WindowGrid wieder normal. Verschieben lassen sich solche Fenster immer.
 - Die alte Version bitte beenden und deren Autostart (Aufgabenplanung,
   Aufgabe "WindowGrid") entfernen, sonst reagieren beide Programme.

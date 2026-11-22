@@ -27,8 +27,6 @@ namespace WindowGrid
         /// <summary>"Beenden" in der Navigation: WindowGrid ganz beenden (das X schließt nur das Fenster).</summary>
         public event EventHandler ExitRequested;
 
-        /// <summary>Nach dem Speichern soll WindowGrid mit Adminrechten neu gestartet werden.</summary>
-        public bool RestartElevatedRequested;
 
         // Maße in logischen Einheiten (× Skalierung)
         private const int NavFull = 230, NavCompact = 68;      // Navigation aus- bzw. eingeklappt
@@ -37,7 +35,7 @@ namespace WindowGrid
 
         private Stepper _cols, _rows, _gap;
         private GridPreview _preview;
-        private ToggleSwitch _resizeOn, _moveOn, _centerOn, _runAdmin, _zoneKeys;
+        private ToggleSwitch _resizeOn, _moveOn, _centerOn, _zoneKeys;
         private bool _discard; // "Abbrechen"/Esc: ohne Rückfrage schließen
         private HotkeyBox _resizeKey, _moveKey, _centerKey;
         private Label _keyHint;
@@ -108,6 +106,8 @@ namespace WindowGrid
             if (show)
             {
                 _bar.Text = "Neue Version " + r.Version + " verfügbar – installiert ist " + AppInfo.Version + ".";
+                _bar.NewVersion = r.Version;
+                _bar.Installed = AppInfo.Version;
                 _bar.Invalidate();
             }
             if (show == _barShown) return;
@@ -282,19 +282,14 @@ namespace WindowGrid
             AddRow(look, "Einblenden animieren", _animate, S(244));
 
             // ================= Seite 5: Allgemein =================
-            Card general = MakeCard(_pages[4], "Allgemein", new Rectangle(cardX, 0, cardW, S(178)));
+            // kein Autostart mit Administratorrechten mehr (globale Vorgabe)
+            Card general = MakeCard(_pages[4], "Allgemein", new Rectangle(cardX, 0, cardW, S(140)));
             _autostart = MakeToggle();
             AddRow(general, "Mit Windows starten", _autostart, S(54));
-            _runAdmin = MakeToggle();
-            Label adminLabel = AddRow(general, "Mit Administratorrechten", _runAdmin, S(92));
-            _tips.SetToolTip(adminLabel,
-                "Nötig, damit WindowGrid auch Fenster von Programmen anordnen kann,\n" +
-                "die als Administrator laufen. Der Autostart läuft dann über die\n" +
-                "Aufgabenplanung – Windows fragt nur beim Einrichten einmal nach.");
             ModernButton snapButton = new ModernButton();
             snapButton.Text = "Öffnen …";
             snapButton.Size = new Size(S(100), S(30));
-            Label snapLabel = AddRow(general, "Windows-Andocklayouts", snapButton, S(130));
+            Label snapLabel = AddRow(general, "Windows-Andocklayouts", snapButton, S(92));
             snapButton.Click += delegate { SnapBar.OpenWindowsSettings(); };
             _tips.SetToolTip(snapLabel,
                 "Öffnet Einstellungen → System → Multitasking. Dort den Haken bei\n" +
@@ -302,7 +297,7 @@ namespace WindowGrid
                 "entfernen, damit sich die Windows-Leiste nicht mit dem Raster überlagert.");
             _tips.SetToolTip(snapButton, "Windows-Einstellung für die Andocklayouts öffnen");
 
-            Card exclude = MakeCard(_pages[4], "Ausnahmen", new Rectangle(cardX, S(194), cardW, S(280)));
+            Card exclude = MakeCard(_pages[4], "Ausnahmen", new Rectangle(cardX, S(156), cardW, S(280)));
             _excluded = new ExcludeEditor(exclude, _sc);
             exclude.Height = S(_excluded.CardHeight);
 
@@ -705,6 +700,8 @@ namespace WindowGrid
             _edit.SnapBarOriginal = _original.SnapBarOriginal;
             _edit.LastUpdateCheck = _original.LastUpdateCheck;
             _edit.UpdateCheck = _original.UpdateCheck; // wird im Info-Fenster eingestellt
+            _edit.AutoInstall = _original.AutoInstall; // ebenso (zählt nicht als ungespeicherte Änderung)
+            _edit.KeepOldTask = _original.KeepOldTask; // Rückfrage zur alten Aufgabe beim Start
             _edit.Paused = _original.Paused;           // wird im Tray-Menü eingestellt
             _edit.FirstRun = _original.FirstRun;
             _edit.NavPinned = _original.NavPinned;     // Stecknadel der Navigation, gilt sofort
@@ -726,7 +723,7 @@ namespace WindowGrid
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
             // Schließen über das X mit ungespeicherten Änderungen: nachfragen ("Abbrechen" und Esc verwerfen ohne Rückfrage)
-            if (e.CloseReason == CloseReason.UserClosing && !_discard && !Demo.Active && !RestartElevatedRequested && HasChanges())
+            if (e.CloseReason == CloseReason.UserClosing && !_discard && !Demo.Active && HasChanges())
             {
                 DialogResult r = MessageBox.Show(this,
                     "Die Änderungen sind noch nicht gespeichert.\n\nÄnderungen verwerfen?",
@@ -799,7 +796,6 @@ namespace WindowGrid
             _centerOn.Checked = _edit.CenterEnabled;
             _centerKey.Key = _edit.CenterKey;
             _centerKey.Enabled = _edit.CenterEnabled;
-            _runAdmin.Checked = _edit.RunAsAdmin;
             _zoneKeys.Checked = _edit.ZoneHotkeys;
             CheckKeyConflict();
             _dim.Value = _edit.Dim;
@@ -828,7 +824,6 @@ namespace WindowGrid
             _edit.MoveKey = _moveKey.Key;
             _edit.CenterEnabled = _centerOn.Checked;
             _edit.CenterKey = _centerKey.Key;
-            _edit.RunAsAdmin = _runAdmin.Checked;
             _edit.ZoneHotkeys = _zoneKeys.Checked;
             _edit.Dim = _dim.Value;
             _edit.UseSystemAccent = _sysAccent.Checked;
@@ -868,7 +863,6 @@ namespace WindowGrid
 
         private void Save()
         {
-            RestartElevatedRequested = false;
             SetStatus("", false);
             // erst prüfen, dann speichern – bei einem Fehler bleibt das Fenster offen
             int[] keys = { _resizeOn.Checked ? _resizeKey.Key : -1, _moveOn.Checked ? _moveKey.Key : -2, _centerOn.Checked ? _centerKey.Key : -3 };
@@ -880,34 +874,18 @@ namespace WindowGrid
             ReadValues();
             // Die letzte Auswahl merkt sich WindowGrid laufend – nicht mit dem Stand beim Öffnen überschreiben
             SyncRuntimeFields();
-            bool adminChanged = _edit.RunAsAdmin != _original.RunAsAdmin;
             bool autoWanted = _autostart.Checked;
             bool autoNow = Autostart.IsEnabled;
             _original.CopyFrom(_edit);
             _original.Save();
 
-            // Autostart (bei Adminrechten über die Aufgabenplanung – Windows fragt einmal nach)
-            if (autoWanted != autoNow || (autoWanted && adminChanged))
+            // Autostart (nur HKCU\...\Run, ohne Adminrechte)
+            if (autoWanted != autoNow && !Autostart.Set(autoWanted))
             {
-                Cursor = Cursors.WaitCursor;
-                bool ok = Autostart.Set(autoWanted, _edit.RunAsAdmin);
-                Cursor = Cursors.Default;
-                if (!ok)
-                {
-                    // übrige Einstellungen sind gespeichert; das Fenster bleibt offen, damit man es erneut versuchen kann
-                    if (Saved != null) Saved(this, EventArgs.Empty);
-                    SetStatus("Autostart nicht eingerichtet – Windows-Nachfrage abgebrochen?", false);
-                    return;
-                }
-            }
-
-            // Jetzt sofort mit Adminrechten neu starten?
-            if (_edit.RunAsAdmin && !Autostart.IsElevated)
-            {
-                DialogResult r = MessageBox.Show(this,
-                    "WindowGrid läuft gerade ohne Administratorrechte.\n\nJetzt mit Administratorrechten neu starten?",
-                    "WindowGrid", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
-                RestartElevatedRequested = r == DialogResult.Yes;
+                // übrige Einstellungen sind gespeichert; das Fenster bleibt offen, damit man es erneut versuchen kann
+                if (Saved != null) Saved(this, EventArgs.Empty);
+                SetStatus("Autostart konnte nicht geändert werden.", false);
+                return;
             }
 
             if (Saved != null) Saved(this, EventArgs.Empty);
@@ -1113,6 +1091,9 @@ namespace WindowGrid
         public readonly ModernButton Later = new ModernButton();
         private readonly float _sc;
 
+        /// <summary>Für die zweizeilige Form bei wenig Platz ("Neue Version x" / "Installiert ist y").</summary>
+        public string NewVersion, Installed;
+
         public UpdateBar(float scale)
         {
             _sc = scale;
@@ -1174,9 +1155,29 @@ namespace WindowGrid
                 x += S(34);
             }
             int right = Install.Left - S(12);
+            const TextFormatFlags one = TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine |
+                                        TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix;
+            int room = Math.Max(10, right - x);
             using (Font f = Theme.UiFont(13.5f * _sc, FontStyle.Bold))
-                TextRenderer.DrawText(g, Text, f, new Rectangle(x, 0, Math.Max(10, right - x), Height), p.Text,
-                    TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
+            {
+                bool fits = TextRenderer.MeasureText(g, Text, f, Size.Empty, TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix).Width <= room;
+                if (fits || string.IsNullOrEmpty(NewVersion))
+                    TextRenderer.DrawText(g, Text, f, new Rectangle(x, 0, room, Height), p.Text, one);
+                else
+                {
+                    // wenig Platz: zweizeilig – oben fett "Neue Version x", darunter grau "Installiert ist y"
+                    using (Font small = Theme.UiFont(12f * _sc, FontStyle.Regular))
+                    {
+                        int h1 = TextRenderer.MeasureText(g, "Ag", f, Size.Empty, TextFormatFlags.NoPadding).Height;
+                        int h2 = TextRenderer.MeasureText(g, "Ag", small, Size.Empty, TextFormatFlags.NoPadding).Height;
+                        int top = (Height - h1 - h2 - S(2)) / 2;
+                        TextFormatFlags np = TextFormatFlags.Left | TextFormatFlags.Top | TextFormatFlags.SingleLine |
+                                             TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding;
+                        TextRenderer.DrawText(g, "Neue Version " + NewVersion, f, new Rectangle(x, top, room, h1), p.Text, np);
+                        TextRenderer.DrawText(g, "Installiert ist " + Installed, small, new Rectangle(x, top + h1 + S(2), room, h2), p.SubText, np);
+                    }
+                }
+            }
         }
     }
 }
