@@ -126,6 +126,8 @@ wenn die Signatur vom Herausgeber stammt und die Prüfsumme (SHA-256) des Downlo
 passt; sonst steht im Info-Fenster z. B. "Nicht signiert." und es öffnet sich nur
 die Release-Seite. Es wird nur ein Update zur Zeit ausgeführt, und übernommen werden
 nur WindowGrid.exe und Anleitung.txt; bei einem Fehler bleibt die bisherige Version.
+Wurde ein Update nicht abgeschlossen (z. B. Stromausfall), bietet WindowGrid beim
+nächsten Update an, die vorherige Version wiederherzustellen, und startet danach neu.
 Liegt WindowGrid in einem Ordner ohne Schreibrechte (z. B. unter Programme), fragt
 Windows einmal nach Administratorrechten; danach startet WindowGrid trotzdem mit
 normalen Rechten neu.

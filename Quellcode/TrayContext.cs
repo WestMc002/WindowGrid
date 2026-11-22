@@ -117,13 +117,16 @@ namespace WindowGrid
             if (afterUpdate)
             {
                 string result = Updater.LastResult();
-                if (result != null && result.StartsWith("OK"))
+                // kurze, verständliche Meldung; der technische Text steht im Fehlerprotokoll
+                if (result != null && result.StartsWith("OK "))
                     _tray.ShowBalloonTip(6000, "WindowGrid aktualisiert", "Version " + result.Substring(2).Trim() + " ist installiert.", ToolTipIcon.Info);
+                else if (result != null && result.StartsWith("ZURUECK"))
+                    _tray.ShowBalloonTip(6000, "Vorherige Version wiederhergestellt", "Das Update kann jetzt erneut installiert werden.", ToolTipIcon.Info);
                 else if (result != null)
                 {
                     Log.Write("Update", result);
-                    _tray.ShowBalloonTip(8000, "Update fehlgeschlagen",
-                        result.Replace("FEHLER", "").Trim() + " – die bisherige Version läuft weiter.", ToolTipIcon.Warning);
+                    _tray.ShowBalloonTip(8000, "Update nicht installiert",
+                        "Die bisherige Version läuft weiter. Einzelheiten stehen im Fehlerprotokoll.", ToolTipIcon.Warning);
                 }
                 // Einstellungen waren vor dem Update offen: wieder öffnen
                 if (!trayOnly) _invoker.BeginInvoke((MethodInvoker)ShowSettings);
