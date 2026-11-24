@@ -11,6 +11,9 @@ namespace WindowGrid
 {
     internal static class Program
     {
+        /// <summary>Versuchskennung aus „--nach-update &lt;Kennung&gt;“ (ab 1.68), sonst null.</summary>
+        internal static string UpdateAttempt;
+
         [STAThread]
         private static int Main(string[] args)
         {
@@ -29,6 +32,9 @@ namespace WindowGrid
             {
                 // Neustart mit Adminrechten: warten, bis sich die alte Instanz beendet hat
                 bool afterUpdate = Array.Exists(args, a => string.Equals(a, "--nach-update", StringComparison.OrdinalIgnoreCase));
+                // ab 1.68 folgt die Versuchskennung (32 Hex-Zeichen): nur das Ergebnis genau dieses Versuchs lesen
+                int at = Array.FindIndex(args, a => string.Equals(a, "--nach-update", StringComparison.OrdinalIgnoreCase));
+                if (at >= 0 && at + 1 < args.Length && Updater.IsAttemptId(args[at + 1])) UpdateAttempt = args[at + 1];
                 bool restart = afterUpdate || Array.Exists(args, a => string.Equals(a, "/neustart", StringComparison.OrdinalIgnoreCase));
                 if (!created && restart)
                 {

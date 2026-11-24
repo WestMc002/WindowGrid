@@ -116,7 +116,7 @@ namespace WindowGrid
             // ---------- Updates (Vorlage: Fensterpositionen wiederherstellen) ----------
             if (afterUpdate)
             {
-                string result = Updater.LastResult();
+                string result = Updater.LastResult(Program.UpdateAttempt);
                 // kurze, verständliche Meldung; der technische Text steht im Fehlerprotokoll
                 if (result != null && result.StartsWith("OK "))
                     _tray.ShowBalloonTip(6000, "WindowGrid aktualisiert", "Version " + result.Substring(2).Trim() + " ist installiert.", ToolTipIcon.Info);
