@@ -922,7 +922,7 @@ namespace WindowGrid
                         }
                     }
                     string p = Path.Combine(Application.StartupPath, "Resources", "GS-Logo.png");
-                    if (File.Exists(p))
+                    if (SafeIo.IsLocalUnredirected(p) && File.Exists(p))
                     {
                         using (FileStream fs = new FileStream(p, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
                         using (Image img = Image.FromStream(fs))

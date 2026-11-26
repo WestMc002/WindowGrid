@@ -314,17 +314,18 @@ namespace WindowGrid
             {
                 try
                 {
-                    if (!File.Exists(c)) continue;
+                    // automatischer Zugriff auf den Programmordner: nur lokal ohne Umleitung, höchstens 1 MB
+                    if (!SafeIo.IsLocalUnredirected(c) || !File.Exists(c) || new FileInfo(c).Length > 1024 * 1024) continue;
                     string json = File.ReadAllText(c);
-                    Match mx = Regex.Match(json, "\"GridX\"\\s*:\\s*(\\d+)");
-                    Match my = Regex.Match(json, "\"GridY\"\\s*:\\s*(\\d+)");
+                    Match mx = Rx.Match(json, "\"GridX\"\\s*:\\s*(\\d+)");
+                    Match my = Rx.Match(json, "\"GridY\"\\s*:\\s*(\\d+)");
                     if (mx.Success && my.Success)
                     {
                         Columns = Math.Max(1, Math.Min(100, int.Parse(mx.Groups[1].Value)));
                         Rows = Math.Max(1, Math.Min(100, int.Parse(my.Groups[1].Value)));
                         if (Columns > 24 || Rows > 24) Gap = 0;
                     }
-                    Match mc = Regex.Match(json, "\"ColorStart\"\\s*:\\s*\"#([0-9A-Fa-f]{8})\"");
+                    Match mc = Rx.Match(json, "\"ColorStart\"\\s*:\\s*\"#([0-9A-Fa-f]{8})\"");
                     if (mc.Success)
                     {
                         int argb = int.Parse(mc.Groups[1].Value, NumberStyles.HexNumber);

@@ -335,7 +335,7 @@ namespace WindowGrid
             if (values["Programm"] != "WindowGrid") { detail = "Das Manifest gehört zu „" + values["Programm"] + "“, nicht zu WindowGrid."; return Invalid; }
             if (values["Version"] != version) { detail = "Das Manifest nennt Version " + values["Version"] + ", das Release " + version + "."; return Invalid; }
             if (values["Datei"] != AssetName(version)) { detail = "Das Manifest nennt die Datei „" + values["Datei"] + "“."; return Invalid; }
-            if (!Regex.IsMatch(values["SHA256"], "^[0-9a-f]{64}$")) { detail = "Die Prüfsumme im Manifest ist ungültig."; return Invalid; }
+            if (!Rx.IsMatch(values["SHA256"], "^[0-9a-f]{64}$")) { detail = "Die Prüfsumme im Manifest ist ungültig."; return Invalid; }
             sha = values["SHA256"].ToUpperInvariant();
             return null;
         }
@@ -551,7 +551,7 @@ namespace WindowGrid
         /// <summary>Gültige Versuchskennung (32 Hex-Zeichen, klein)?</summary>
         public static bool IsAttemptId(string id)
         {
-            return id != null && Regex.IsMatch(id, "^[0-9a-f]{32}$");
+            return id != null && Rx.IsMatch(id, "^[0-9a-f]{32}$");
         }
 
         /// <summary>
@@ -979,7 +979,7 @@ namespace WindowGrid
             {
                 for (; i < lines.Length && lines[i].StartsWith("Geplant ", StringComparison.Ordinal); i++)
                 {
-                    Match g = Regex.Match(lines[i], @"^Geplant (\d+): Ziel: (.+)$");
+                    Match g = Rx.Match(lines[i], @"^Geplant (\d+): Ziel: (.+)$");
                     if (!g.Success || g.Groups[1].Value != (planned.Count + 1).ToString(CultureInfo.InvariantCulture) || !allowed(g.Groups[2].Value)) return false;
                     string p = g.Groups[2].Value;
                     if (planned.Exists(x => string.Equals(x, p, StringComparison.OrdinalIgnoreCase))) return false;
@@ -996,7 +996,7 @@ namespace WindowGrid
             for (; i < lines.Length; i++)
             {
                 string line = lines[i];
-                Match e = Regex.Match(line, @"^Ersetzt (\d+)$");
+                Match e = Rx.Match(line, @"^Ersetzt (\d+)$");
                 if (e.Success)
                 {
                     if (list.Count == 0 || replacedLast || e.Groups[1].Value != list[list.Count - 1].N) return false;
@@ -1004,8 +1004,8 @@ namespace WindowGrid
                     continue;
                 }
                 Match m = withHash
-                    ? Regex.Match(line, @"^Vorher (\d+): (Sicherung|Neu) \| Ziel: (.+?)(?: \| Sicherungsdatei: .+? \| SHA256: ([0-9A-F]{64}))? \| Hilfsdatei: (.+)$")
-                    : Regex.Match(line, @"^Vorher (\d+): (Sicherung|Neu) \| Ziel: (.+?)()(?: \| Sicherungsdatei: .+?)? \| Hilfsdatei: (.+)$");
+                    ? Rx.Match(line, @"^Vorher (\d+): (Sicherung|Neu) \| Ziel: (.+?)(?: \| Sicherungsdatei: .+? \| SHA256: ([0-9A-F]{64}))? \| Hilfsdatei: (.+)$")
+                    : Rx.Match(line, @"^Vorher (\d+): (Sicherung|Neu) \| Ziel: (.+?)()(?: \| Sicherungsdatei: .+?)? \| Hilfsdatei: (.+)$");
                 if (!m.Success) return false;
                 JournalEntry entry = new JournalEntry();
                 entry.N = m.Groups[1].Value; entry.Kind = m.Groups[2].Value; entry.Dst = m.Groups[3].Value;

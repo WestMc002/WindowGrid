@@ -103,7 +103,8 @@ namespace WindowGrid
                     string v = key.GetValue(ValueName) as string;
                     if (v == null || string.Equals(v, Command, StringComparison.OrdinalIgnoreCase)) return;
                     string old = v.Trim().Trim('"');
-                    if (!File.Exists(old)) key.SetValue(ValueName, Command);
+                    // gemerkter Pfad: Netzwerk oder Umleitung nicht ansprechen, Eintrag dann unverändert lassen
+                    if (SafeIo.IsLocalUnredirected(old) && !File.Exists(old)) key.SetValue(ValueName, Command);
                 }
             }
             catch { }
