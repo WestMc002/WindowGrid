@@ -213,9 +213,20 @@ namespace WindowGrid
             }
             _filePath = path;
             Settings s = new Settings();
-            try { s.ReadFile(path); }
+            try
+            {
+                string text = ReadLimited(path);
+                if (text == null) Log.Write("Einstellungen laden", "Die Einstellungsdatei ist größer als 1 MB und wird nicht gelesen.");
+                else s.ParseText(text);
+            }
             catch (Exception ex) { Log.Write("Einstellungen laden", ex); }
             return s;
+        }
+
+        /// <summary>Einstellungsdatei mit einem einzigen Öffnen und höchstens 1 MB lesen; null, wenn sie größer ist.</summary>
+        private static string ReadLimited(string path)
+        {
+            return SafeIo.ReadText(path, 1024 * 1024);
         }
 
         /// <summary>Einstellungen aus einer anderen Datei lesen (Import). null, wenn die Datei keine WindowGrid.ini ist.</summary>
@@ -223,13 +234,14 @@ namespace WindowGrid
         {
             try
             {
-                // Datei von außen: erst die Größe prüfen (eine WindowGrid.ini hat nur wenige KB)
-                if (new FileInfo(path).Length > 1024 * 1024) return null;
-                string text = File.ReadAllText(path, Encoding.UTF8);
+                // Datei von außen: einmal öffnen, höchstens 1 MB lesen (eine WindowGrid.ini hat nur wenige KB)
+                // und genau diesen Text prüfen und einlesen
+                string text = ReadLimited(path);
+                if (text == null) return null;
                 if (text.IndexOf("[Raster]", StringComparison.OrdinalIgnoreCase) < 0 ||
                     text.IndexOf("Spalten", StringComparison.OrdinalIgnoreCase) < 0) return null;
                 Settings s = new Settings();
-                s.ReadFile(path);
+                s.ParseText(text);
                 s.FirstRun = false;
                 return s;
             }
@@ -240,12 +252,12 @@ namespace WindowGrid
             }
         }
 
-        private void ReadFile(string path)
+        private void ParseText(string text)
         {
             Settings s = this;
             {
                 Dictionary<string, string> values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-                foreach (string raw in File.ReadAllLines(path, Encoding.UTF8))
+                foreach (string raw in text.Split(new[] { "\r\n", "\n", "\r" }, StringSplitOptions.None))
                 {
                     string line = raw.Trim();
                     if (line.Length == 0 || line.StartsWith(";") || line.StartsWith("[")) continue;
@@ -315,8 +327,9 @@ namespace WindowGrid
                 try
                 {
                     // automatischer Zugriff auf den Programmordner: nur lokal ohne Umleitung, höchstens 1 MB
-                    if (!SafeIo.IsLocalUnredirected(c) || !File.Exists(c) || new FileInfo(c).Length > 1024 * 1024) continue;
-                    string json = File.ReadAllText(c);
+                    if (!SafeIo.IsLocalUnredirected(c) || !File.Exists(c)) continue;
+                    string json = SafeIo.ReadText(c, 1024 * 1024); // ein Öffnen, Grenze beim Lesen
+                    if (json == null) continue;
                     Match mx = Rx.Match(json, "\"GridX\"\\s*:\\s*(\\d+)");
                     Match my = Rx.Match(json, "\"GridY\"\\s*:\\s*(\\d+)");
                     if (mx.Success && my.Success)

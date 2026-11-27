@@ -4,6 +4,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -40,6 +41,35 @@ namespace WindowGrid
     /// </summary>
     internal static class SafeIo
     {
+        /// <summary>
+        /// Textdatei mit einem einzigen Öffnen lesen und die Grenze beim Lesen durchsetzen (UTF-8, BOM wird erkannt).
+        /// null, wenn sie größer als max Bytes ist. So prüft und verarbeitet der Aufrufer genau den gelesenen Inhalt;
+        /// eine spätere Änderung der Datei spielt keine Rolle.
+        /// </summary>
+        internal static string ReadText(string path, int max)
+        {
+            using (FileStream fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
+            {
+                byte[] buf = new byte[max + 1];
+                int total = 0, n;
+                while (total < buf.Length && (n = fs.Read(buf, total, buf.Length - total)) > 0) total += n;
+                if (total > max) return null;
+                using (StreamReader r = new StreamReader(new MemoryStream(buf, 0, total), Encoding.UTF8, true))
+                    return r.ReadToEnd();
+            }
+        }
+
+        /// <summary>Wie ReadText, aber als Zeilen (Zeilenenden wie File.ReadAllLines); null, wenn zu groß.</summary>
+        internal static string[] ReadLines(string path, int max)
+        {
+            string text = ReadText(path, max);
+            if (text == null) return null;
+            List<string> lines = new List<string>(text.Split('\n'));
+            for (int i = 0; i < lines.Count; i++) if (lines[i].EndsWith("\r")) lines[i] = lines[i].Substring(0, lines[i].Length - 1);
+            if (lines.Count > 0 && lines[lines.Count - 1].Length == 0) lines.RemoveAt(lines.Count - 1);
+            return lines.ToArray();
+        }
+
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
         private static extern uint QueryDosDevice(string lpDeviceName, StringBuilder lpTargetPath, uint ucchMax);
 

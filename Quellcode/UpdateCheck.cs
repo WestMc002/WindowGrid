@@ -1071,9 +1071,10 @@ namespace WindowGrid
             try
             {
                 string marker = Path.Combine(dir, PendingMarker);
-                if (new FileInfo(marker).Length > 4096) return MarkerKind.Unknown;
+                string[] markerLines = SafeIo.ReadLines(marker, 4096); // ein Öffnen, Grenze beim Lesen
+                if (markerLines == null) return MarkerKind.Unknown;
                 List<string> lines = new List<string>();
-                foreach (string l in File.ReadAllLines(marker, Encoding.UTF8))
+                foreach (string l in markerLines)
                 {
                     string t = l.Trim().TrimStart('\uFEFF');
                     if (t.Length > 0) lines.Add(t);
@@ -1106,8 +1107,9 @@ namespace WindowGrid
             MarkerKind kind = ReadMarker(dir);
             if (kind == MarkerKind.Unknown) return false;
             string journal = Path.Combine(dir, "Wiederherstellung.txt");
-            if (!File.Exists(journal) || new FileInfo(journal).Length > 64 * 1024) return false;
-            string[] lines = File.ReadAllLines(journal, Encoding.UTF8);
+            if (!File.Exists(journal)) return false;
+            string[] lines = SafeIo.ReadLines(journal, 64 * 1024); // ein Öffnen, Grenze beim Lesen
+            if (lines == null) return false;
             if (lines.Length < 2 || !(lines[0].StartsWith("WindowGrid ", StringComparison.Ordinal) || lines[0].StartsWith("WindowGrid-Update ", StringComparison.Ordinal)) ||
                 !lines[0].EndsWith(" - Wiederherstellungsjournal", StringComparison.Ordinal)) return false;
             bool format2 = kind == MarkerKind.Format2;
