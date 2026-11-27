@@ -9,6 +9,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Net;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -335,7 +336,10 @@ namespace WindowGrid
             if (values["Programm"] != "WindowGrid") { detail = "Das Manifest gehört zu „" + values["Programm"] + "“, nicht zu WindowGrid."; return Invalid; }
             if (values["Version"] != version) { detail = "Das Manifest nennt Version " + values["Version"] + ", das Release " + version + "."; return Invalid; }
             if (values["Datei"] != AssetName(version)) { detail = "Das Manifest nennt die Datei „" + values["Datei"] + "“."; return Invalid; }
-            if (!Rx.IsMatch(values["SHA256"], "^[0-9a-f]{64}$")) { detail = "Die Prüfsumme im Manifest ist ungültig."; return Invalid; }
+            bool shaOk;
+            try { shaOk = Regex.IsMatch(values["SHA256"], "^[0-9a-f]{64}$", RegexOptions.None, RxTimeout); }
+            catch (RegexMatchTimeoutException) { shaOk = false; } // nicht eindeutig prüfbar = ungültig
+            if (!shaOk) { detail = "Die Prüfsumme im Manifest ist ungültig."; return Invalid; }
             sha = values["SHA256"].ToUpperInvariant();
             return null;
         }
@@ -504,11 +508,143 @@ namespace WindowGrid
         {
             if (InProjectFolder)
                 return "Im Projektordner (mit Erstellen.bat) wird nicht automatisch aktualisiert – dort entsteht die EXE beim Erstellen.";
-            if (Autostart.IsElevated)
-                return "WindowGrid läuft gerade mit Administratorrechten. Bitte WindowGrid normal starten und dann aktualisieren.";
+            // mit Administratorrechten nur aktualisieren, wenn es auf diesem System keine normalen Rechte gibt (dann über
+            // den geschützten Arbeitsordner unter ProgramData); sonst mit normalen Rechten neu starten (RestartUnelevated)
+            if (Autostart.IsElevated && !AlwaysElevated) return ElevatedText;
             if (PendingRestore() != null) return PendingText;
             return null;
         }
+
+        private const string ElevatedText = "WindowGrid läuft gerade mit Administratorrechten. Bitte WindowGrid normal starten und dann aktualisieren.";
+
+        /// <summary>
+        /// Steht dem Update nur im Weg, dass WindowGrid mit Administratorrechten läuft? Dann startet es sich mit normalen
+        /// Rechten neu (RestartUnelevated) und installiert dort – mit Administratorrechten wird nie aktualisiert.
+        /// </summary>
+        public static bool OnlyElevationBlocks()
+        {
+            ReleaseInfo r = Available;
+            if (r == null || string.IsNullOrEmpty(r.ZipUrl) || string.IsNullOrEmpty(r.Sha256)) return false;
+            return InstallBlocker() == ElevatedText;
+        }
+
+        /// <summary>
+        /// WindowGrid mit normalen Rechten neu starten („--aktualisieren“): mit dem Benutzerkonto der Windows-Oberfläche
+        /// (Token des Explorers, CreateProcessWithTokenW), nicht mit den eigenen Administratorrechten. Läuft auch die
+        /// Oberfläche erhöht (Benutzerkontensteuerung aus), wird nichts gestartet. Der Aufrufer beendet sich danach;
+        /// die neue Instanz wartet auf die Einzelinstanz-Sperre und installiert dann ohne weitere Rückfrage.
+        /// </summary>
+        public static bool RestartUnelevated(bool tray)
+        {
+            IntPtr token = IntPtr.Zero;
+            try
+            {
+                token = ShellToken();
+                if (token == IntPtr.Zero) return false;
+                string exe = Application.ExecutablePath;
+                string cmd = "\"" + exe + "\" --aktualisieren" + (tray ? " /tray" : "");
+                StartupInfo si = new StartupInfo();
+                si.cb = Marshal.SizeOf(typeof(StartupInfo));
+                ProcessInfo pi;
+                if (!CreateProcessWithTokenW(token, 0, exe, cmd, 0, IntPtr.Zero, Path.GetDirectoryName(exe), ref si, out pi))
+                {
+                    Log.Write("Update", "Neustart mit normalen Rechten nicht möglich (Fehler " + Marshal.GetLastWin32Error() + ").");
+                    return false;
+                }
+                CloseHandle(pi.hThread);
+                CloseHandle(pi.hProcess);
+                Log.Write("Update", "Mit normalen Rechten neu gestartet, um das Update zu installieren.");
+                return true;
+            }
+            catch (Exception ex) { Log.Write("Update", ex); return false; }
+            finally
+            {
+                if (token != IntPtr.Zero) CloseHandle(token);
+            }
+        }
+
+        /// <summary>
+        /// Primäres Token der Windows-Oberfläche (Explorer) mit normalen Rechten, sonst IntPtr.Zero (keine Oberfläche,
+        /// kein Zugriff oder die Oberfläche läuft selbst erhöht). Der Aufrufer gibt es mit CloseHandle frei.
+        /// </summary>
+        private static IntPtr ShellToken()
+        {
+            IntPtr proc = IntPtr.Zero, shellToken = IntPtr.Zero, token = IntPtr.Zero;
+            try
+            {
+                IntPtr shell = GetShellWindow();
+                if (shell == IntPtr.Zero) return IntPtr.Zero;
+                uint pid;
+                GetWindowThreadProcessId(shell, out pid);
+                if (pid == 0) return IntPtr.Zero;
+                proc = OpenProcess(0x1000, false, pid); // PROCESS_QUERY_LIMITED_INFORMATION
+                if (proc == IntPtr.Zero) return IntPtr.Zero;
+                if (!OpenProcessToken(proc, 0x0002, out shellToken)) return IntPtr.Zero; // TOKEN_DUPLICATE
+                // TOKEN_QUERY | TOKEN_ASSIGN_PRIMARY | TOKEN_DUPLICATE | TOKEN_ADJUST_DEFAULT | TOKEN_ADJUST_SESSIONID
+                if (!DuplicateTokenEx(shellToken, 0x018B, IntPtr.Zero, 2, 1, out token)) { token = IntPtr.Zero; return IntPtr.Zero; }
+                int elevated, len;
+                if (!GetTokenInformation(token, 20, out elevated, 4, out len) || elevated != 0) return IntPtr.Zero; // TokenElevation
+                IntPtr result = token;
+                token = IntPtr.Zero;
+                return result;
+            }
+            catch { return IntPtr.Zero; }
+            finally
+            {
+                if (token != IntPtr.Zero) CloseHandle(token);
+                if (shellToken != IntPtr.Zero) CloseHandle(shellToken);
+                if (proc != IntPtr.Zero) CloseHandle(proc);
+            }
+        }
+
+        /// <summary>
+        /// Läuft WindowGrid mit Administratorrechten auf einem System ohne normale Rechte (Benutzerkontensteuerung aus
+        /// oder eingebautes Konto „Administrator“, z. B. auf Windows Server)? Dann gibt es keinen Neustart mit normalen
+        /// Rechten; das Update läuft mit Administratorrechten, aber immer über den geschützten Arbeitsordner unter
+        /// %ProgramData% (Abweichung „ohne normale Rechte“). Erkennung: Die Windows-Oberfläche liefert kein Token mit
+        /// normalen Rechten. Ohne Oberfläche (z. B. kein Explorer) gilt das ebenso, weil dann niemand normal starten kann.
+        /// </summary>
+        public static bool AlwaysElevated
+        {
+            get
+            {
+                if (!Autostart.IsElevated) return false;
+                IntPtr token = ShellToken();
+                if (token == IntPtr.Zero) return true;
+                CloseHandle(token);
+                return false;
+            }
+        }
+
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        private struct StartupInfo
+        {
+            public int cb;
+            public string lpReserved, lpDesktop, lpTitle;
+            public int dwX, dwY, dwXSize, dwYSize, dwXCountChars, dwYCountChars, dwFillAttribute, dwFlags;
+            public short wShowWindow, cbReserved2;
+            public IntPtr lpReserved2, hStdInput, hStdOutput, hStdError;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct ProcessInfo
+        {
+            public IntPtr hProcess, hThread;
+            public int dwProcessId, dwThreadId;
+        }
+
+        [DllImport("user32.dll")] private static extern IntPtr GetShellWindow();
+        [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint pid);
+        [DllImport("kernel32.dll", SetLastError = true)] private static extern IntPtr OpenProcess(uint access, bool inherit, uint pid);
+        [DllImport("kernel32.dll")] private static extern bool CloseHandle(IntPtr handle);
+        [DllImport("advapi32.dll", SetLastError = true)] private static extern bool OpenProcessToken(IntPtr process, uint access, out IntPtr token);
+        [DllImport("advapi32.dll", SetLastError = true)]
+        private static extern bool DuplicateTokenEx(IntPtr existing, uint access, IntPtr attributes, int level, int type, out IntPtr token);
+        [DllImport("advapi32.dll", SetLastError = true)]
+        private static extern bool GetTokenInformation(IntPtr token, int infoClass, out int info, int length, out int returned);
+        [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+        private static extern bool CreateProcessWithTokenW(IntPtr token, int logonFlags, string application, string commandLine,
+            int creationFlags, IntPtr environment, string currentDirectory, ref StartupInfo startup, out ProcessInfo info);
 
         /// <summary>Läuft die EXE im Projektordner (Erstellen.bat daneben)? Dort entsteht sie beim Bauen.</summary>
         private static bool InProjectFolder
@@ -551,8 +687,16 @@ namespace WindowGrid
         /// <summary>Gültige Versuchskennung (32 Hex-Zeichen, klein)?</summary>
         public static bool IsAttemptId(string id)
         {
-            return id != null && Rx.IsMatch(id, "^[0-9a-f]{32}$");
+            if (id == null || id.Length != 32) return false;
+            try { return Regex.IsMatch(id, "^[0-9a-f]{32}$", RegexOptions.None, RxTimeout); }
+            catch (RegexMatchTimeoutException) { return false; }
         }
+
+        /// <summary>
+        /// Zeitlimit für Regex-Prüfungen fremder Daten (Manifest, Journal, Befehlszeile, Ausschlussmuster). Eine
+        /// Zeitüberschreitung gilt als „nicht eindeutig prüfbar“ und führt zur Ablehnung.
+        /// </summary>
+        internal static readonly TimeSpan RxTimeout = TimeSpan.FromMilliseconds(250);
 
         /// <summary>
         /// ZIP herunterladen, Prüfsumme (aus dem signierten Manifest) kontrollieren und das Update-Skript starten (blockierend – im Hintergrund
@@ -671,7 +815,9 @@ namespace WindowGrid
             }
             string logFile = LogFor(attemptId);
             string exe = Application.ExecutablePath;
-            bool elevated = !CanWrite(Path.GetDirectoryName(exe));
+            // Ohne normale Rechte (AlwaysElevated) läuft WindowGrid schon erhöht: dann immer der geschützte Weg, auch wenn
+            // die Schreibprobe gelingt (sonst liefe das Skript erhöht mit Arbeitsordner im Temp-Ordner)
+            bool elevated = Autostart.IsElevated || !CanWrite(Path.GetDirectoryName(exe));
             // Erhöht: eigener, nicht vorhersagbarer Arbeitsordner direkt unter ProgramData, den das Skript nur für
             // Administratoren beschreibbar anlegt. Sonst reicht der Arbeitsordner im Temp-Ordner des Benutzers.
             string work = elevated
@@ -946,6 +1092,13 @@ namespace WindowGrid
         /// </summary>
         private static bool ReadJournal(string dir, out List<JournalEntry> entries)
         {
+            // Zeitüberschreitung beim Regex-Abgleich: nicht eindeutig prüfbar = Stand ungeklärt
+            try { return ReadJournalCore(dir, out entries); }
+            catch (RegexMatchTimeoutException) { entries = null; return false; }
+        }
+
+        private static bool ReadJournalCore(string dir, out List<JournalEntry> entries)
+        {
             entries = null;
             string exe = Application.ExecutablePath;
             string manual = Path.Combine(Path.GetDirectoryName(exe), ManualName);
@@ -979,7 +1132,8 @@ namespace WindowGrid
             {
                 for (; i < lines.Length && lines[i].StartsWith("Geplant ", StringComparison.Ordinal); i++)
                 {
-                    Match g = Rx.Match(lines[i], @"^Geplant (\d+): Ziel: (.+)$");
+                    if (lines[i].Length > 4096) return false;
+                    Match g = Regex.Match(lines[i], @"^Geplant (\d+): Ziel: (.+)$", RegexOptions.None, RxTimeout);
                     if (!g.Success || g.Groups[1].Value != (planned.Count + 1).ToString(CultureInfo.InvariantCulture) || !allowed(g.Groups[2].Value)) return false;
                     string p = g.Groups[2].Value;
                     if (planned.Exists(x => string.Equals(x, p, StringComparison.OrdinalIgnoreCase))) return false;
@@ -996,7 +1150,8 @@ namespace WindowGrid
             for (; i < lines.Length; i++)
             {
                 string line = lines[i];
-                Match e = Rx.Match(line, @"^Ersetzt (\d+)$");
+                if (line.Length > 4096) return false; // so lang wird keine gültige Zeile
+                Match e = Regex.Match(line, @"^Ersetzt (\d+)$", RegexOptions.None, RxTimeout);
                 if (e.Success)
                 {
                     if (list.Count == 0 || replacedLast || e.Groups[1].Value != list[list.Count - 1].N) return false;
@@ -1004,8 +1159,8 @@ namespace WindowGrid
                     continue;
                 }
                 Match m = withHash
-                    ? Rx.Match(line, @"^Vorher (\d+): (Sicherung|Neu) \| Ziel: (.+?)(?: \| Sicherungsdatei: .+? \| SHA256: ([0-9A-F]{64}))? \| Hilfsdatei: (.+)$")
-                    : Rx.Match(line, @"^Vorher (\d+): (Sicherung|Neu) \| Ziel: (.+?)()(?: \| Sicherungsdatei: .+?)? \| Hilfsdatei: (.+)$");
+                    ? Regex.Match(line, @"^Vorher (\d+): (Sicherung|Neu) \| Ziel: (.+?)(?: \| Sicherungsdatei: .+? \| SHA256: ([0-9A-F]{64}))? \| Hilfsdatei: (.+)$", RegexOptions.None, RxTimeout)
+                    : Regex.Match(line, @"^Vorher (\d+): (Sicherung|Neu) \| Ziel: (.+?)()(?: \| Sicherungsdatei: .+?)? \| Hilfsdatei: (.+)$", RegexOptions.None, RxTimeout);
                 if (!m.Success) return false;
                 JournalEntry entry = new JournalEntry();
                 entry.N = m.Groups[1].Value; entry.Kind = m.Groups[2].Value; entry.Dst = m.Groups[3].Value;
@@ -1077,8 +1232,9 @@ namespace WindowGrid
         {
             // im Projektordner (Erstellen.bat neben der EXE) wird nie etwas zurückgesetzt, wie beim Update
             if (InProjectFolder) return false;
-            // nie aus einer Instanz mit Administratorrechten (sonst liefe die Reparatur mit geerbten Rechten)
-            if (Autostart.IsElevated)
+            // nie aus einer Instanz mit Administratorrechten (sonst liefe die Reparatur mit geerbten Rechten) – außer auf
+            // Systemen ohne normale Rechte; dort nur geschützte Arbeitsordner unter ProgramData (Repair prüft das)
+            if (Autostart.IsElevated && !AlwaysElevated)
             {
                 MessageBox.Show(owner, "WindowGrid läuft gerade mit Administratorrechten. Bitte WindowGrid normal starten und dann aktualisieren.",
                     "Update", MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -1147,9 +1303,12 @@ namespace WindowGrid
         private static void Repair(string dir, bool tray)
         {
             if (InProjectFolder) throw new Exception("Im Projektordner wird nichts zurückgesetzt.");
-            if (Autostart.IsElevated) throw new Exception("WindowGrid läuft gerade mit Administratorrechten.");
             string data = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
             bool protectedDir = string.Equals(Path.GetDirectoryName(dir), data, StringComparison.OrdinalIgnoreCase);
+            if (Autostart.IsElevated && !(AlwaysElevated && protectedDir))
+                throw new Exception(AlwaysElevated
+                    ? "Die vorherige Version lässt sich nicht automatisch wiederherstellen. Bitte WindowGrid neu herunterladen."
+                    : "WindowGrid läuft gerade mit Administratorrechten.");
             string exe = Application.ExecutablePath;
             bool writable = CanWrite(Path.GetDirectoryName(exe));
             // Sicherungen aus dem Temp-Ordner nie mit Administratorrechten zurückkopieren (jedes Programm des Benutzers
@@ -1293,6 +1452,20 @@ namespace WindowGrid
                 if (OfferRepair(owner, owner == null) && ExitRequested != null) ExitRequested(null, EventArgs.Empty);
                 return;
             }
+            if (blocker == ElevatedText && !string.IsNullOrEmpty(release.ZipUrl) && !string.IsNullOrEmpty(release.Sha256))
+            {
+                // nicht mit Administratorrechten aktualisieren, sondern mit normalen Rechten neu starten und dort installieren
+                if (MessageBox.Show(owner,
+                    "WindowGrid läuft gerade mit Administratorrechten. Für das Update startet WindowGrid mit normalen Rechten neu " +
+                    "und installiert dann Version " + release.Version + ".\nDie Einstellungen bleiben erhalten.\n\nJetzt aktualisieren?",
+                    "Update", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+                if (RestartUnelevated(owner == null))
+                {
+                    if (ExitRequested != null) ExitRequested(null, EventArgs.Empty);
+                    return;
+                }
+                // Neustart nicht möglich (z. B. Benutzerkontensteuerung aus): wie bisher auf den normalen Start verweisen
+            }
             if (blocker != null || string.IsNullOrEmpty(release.ZipUrl) || string.IsNullOrEmpty(release.Sha256))
             {
                 string why = blocker;
@@ -1343,7 +1516,10 @@ namespace WindowGrid
         /// Automatisch aktualisieren: ohne Rückfrage herunterladen und installieren (nur mit ZIP, nicht im Projektordner).
         /// Fehler ohne Meldung: Die Hinweise bleiben, die Kurzmeldung steht mit „Details“ im Info-Fenster.
         /// </summary>
-        public static void InstallSilently(Control invoker, bool tray)
+        public static void InstallSilently(Control invoker, bool tray) { InstallSilently(invoker, tray, null); }
+
+        /// <param name="failed">Fehler melden (nach „--aktualisieren“ hat der Benutzer das Update ausdrücklich gewollt).</param>
+        public static void InstallSilently(Control invoker, bool tray, Action<string> failed)
         {
             ReleaseInfo release = Available;
             if (release == null || !CanInstall() || Busy) return;
@@ -1356,7 +1532,12 @@ namespace WindowGrid
                 {
                     invoker.BeginInvoke((MethodInvoker)delegate
                     {
-                        if (error != null) { _installError = (error.Data["Detail"] as string) ?? error.Message; return; }
+                        if (error != null)
+                        {
+                            _installError = (error.Data["Detail"] as string) ?? error.Message;
+                            if (failed != null) failed(error.Message);
+                            return;
+                        }
                         if (ExitRequested != null) ExitRequested(null, EventArgs.Empty);
                     });
                 }
@@ -2078,6 +2259,7 @@ try {
   while ($i -lt $lines.Count -and -not $lines[$i].StartsWith($first)) { if ($lines[$i] -cmatch $keywords) { throw 'Das Journal ist nicht lesbar.' }; $i++ }
   if ($format2) {
     while ($i -lt $lines.Count -and $lines[$i].StartsWith('Geplant ')) {
+      if ($lines[$i].Length -gt 4096) { throw 'Das Journal ist nicht lesbar.' }
       if ($lines[$i] -cnotmatch '^Geplant (\d+): Ziel: (.+)$') { throw 'Das Journal ist nicht lesbar.' }
       if ($Matches[1] -ne [string]($planned.Count + 1) -or $allowed -notcontains $Matches[2] -or $planned -contains $Matches[2]) { throw 'Unerwarteter Eintrag im Journal.' }
       $planned += $Matches[2]
@@ -2092,6 +2274,8 @@ try {
   $replacedLast = $true
     for (; $i -lt $lines.Count; $i++) {
       $line = $lines[$i]
+      # so lang wird keine gueltige Zeile; begrenzt zugleich die Laufzeit der Muster unten
+      if ($line.Length -gt 4096) { throw 'Das Journal ist nicht lesbar.' }
       if ($line -cmatch '^Ersetzt (\d+)$') {
         if ($entries.Count -eq 0 -or $replacedLast -or $Matches[1] -ne $entries[$entries.Count - 1].N) { throw 'Das Journal ist nicht lesbar.' }
         $replacedLast = $true

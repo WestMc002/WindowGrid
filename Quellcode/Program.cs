@@ -14,6 +14,10 @@ namespace WindowGrid
         /// <summary>Versuchskennung aus „--nach-update &lt;Kennung&gt;“ (ab 1.68), sonst null.</summary>
         internal static string UpdateAttempt;
 
+        /// <summary>„--aktualisieren“: WindowGrid lief mit Administratorrechten und hat sich für das Update mit normalen
+        /// Rechten neu gestartet – nach dem Start ohne weitere Rückfrage aktualisieren.</summary>
+        internal static bool InstallNow;
+
         [STAThread]
         private static int Main(string[] args)
         {
@@ -35,7 +39,8 @@ namespace WindowGrid
                 // ab 1.68 folgt die Versuchskennung (32 Hex-Zeichen): nur das Ergebnis genau dieses Versuchs lesen
                 int at = Array.FindIndex(args, a => string.Equals(a, "--nach-update", StringComparison.OrdinalIgnoreCase));
                 if (at >= 0 && at + 1 < args.Length && Updater.IsAttemptId(args[at + 1])) UpdateAttempt = args[at + 1];
-                bool restart = afterUpdate || Array.Exists(args, a => string.Equals(a, "/neustart", StringComparison.OrdinalIgnoreCase));
+                InstallNow = Array.Exists(args, a => string.Equals(a, "--aktualisieren", StringComparison.OrdinalIgnoreCase));
+                bool restart = afterUpdate || InstallNow || Array.Exists(args, a => string.Equals(a, "/neustart", StringComparison.OrdinalIgnoreCase));
                 if (!created && restart)
                 {
                     try { created = mutex.WaitOne(10000); }
